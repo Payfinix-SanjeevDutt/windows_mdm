@@ -67,7 +67,7 @@ def discovery_service():
     return jsonify(response), 201
 
 # @device_bp.route('/mdm/enroll', methods=['POST'])
-# def oma_dm_enroll():
+# def oma_dm_enroll():14
     print("request_D>>>>>>>>>>", request.data)
     # if request.content_type != 'application/xml':
     #     return jsonify({"error": "Unsupported Media Type"}), 415
@@ -189,3 +189,36 @@ def get_device(device_id):
 def fetch_devices_from_azure():
     devices = fetch_device_details()
     return jsonify(devices)
+
+
+
+
+
+#------------------------------sunil----------------------------
+# Define your domain
+DOMAIN = "@sujanix.com"
+
+# Function to check if email belongs to your tenant
+def is_user_belong_to_tenant(email):
+    return email.endswith(DOMAIN)
+
+# API to check if email belongs to your tenant
+@device_bp.route('/check_user_tenant', methods=['POST'])
+def check_user_tenant():
+    email = request.json.get('email')
+
+    # Validate email input
+    if not email:
+        return jsonify({"error": "Email not provided"}), 400
+
+    # Check if email belongs to the tenant
+    if is_user_belong_to_tenant(email):
+        return jsonify({"message": f"The email {email} belongs to your tenant."}), 200
+    else:
+        return jsonify({"message": f"The email {email} does not belong to your tenant."}), 200
+
+
+
+
+
+
