@@ -3,7 +3,7 @@ import os
 
 app = create_app()
 
-@app.route("/health")
+@app.route("/")
 def health():
     return "OK", 200
 
