@@ -1,11 +1,11 @@
 from app import create_app
 import os
+from flask import Flask,jsonify,request
 
 app = create_app()
 
-@app.route("/")
-def health():
-    return "OK", 200
+
+
 
 
 if __name__ == '__main__':
