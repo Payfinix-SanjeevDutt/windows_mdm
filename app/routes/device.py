@@ -11,7 +11,7 @@ import requests
 # device_bp = Blueprint('device', __name__, url_prefix='/devices')
 device_blueprint = Blueprint('device', __name__)
 
-@device_blueprint.route('/discovery.svc', methods=['GET'])
+@device_blueprint.route('/discovery.svc', methods=['POST'])
 def discover():
     """Discovery endpoint for MDM enrollment."""
     return jsonify({"enrollment_url": "https://windowsmdm.sujanix.com/enroll"})

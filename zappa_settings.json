@@ -12,5 +12,6 @@
         "project_name": "windows-mdm",
         "runtime": "python3.9",
         "s3_bucket": "zappa-windowsmdm"
+        
     }
 }
