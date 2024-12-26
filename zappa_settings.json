@@ -1,6 +1,6 @@
 {
     "dev": {
-        "app_function": "run.app",
+        "app_function": "app.app",
         "exclude": [
             "boto3",
             "dateutil",

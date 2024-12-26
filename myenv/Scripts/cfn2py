@@ -1,4 +1,4 @@
-#!D:\Sujanix\windows_mdm\myenv\Scripts\python.exe
+#!D:\Sujanix\windows-mdm-server\myenv\Scripts\python.exe
 
 import argparse
 import json
