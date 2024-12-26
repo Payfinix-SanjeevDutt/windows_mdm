@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, render_template
+from flask import Flask, request, jsonify, render_template, Response
 from utils.graph_api import enroll_device, list_devices
 import xml.etree.ElementTree as ET
 import requests
@@ -25,8 +25,19 @@ def home():
 def terms_of_use():
     return render_template('terms_of_use.html')
 
+# Function to parse SOAP message
+def parse_soap_message(decoded_body):
+    # Parse the decoded SOAP XML
+    tree = ET.ElementTree(ET.fromstring(decoded_body))
+    root = tree.getroot()
+    
+    # Extract data (adjust based on the exact structure of the XML)
+    for elem in root.iter():
+        print(f"{elem.tag}: {elem.text}")
+    return root
+
 # Compliance Status
-@app.route('/compliance', methods=['GET'])
+@app.route('/EnrollmentServer/Compliance.svc', methods=['GET'])
 def compliance():
     # Simulate compliance data
     device_id = request.args.get("device_id")
@@ -41,19 +52,157 @@ def compliance():
     }
     return jsonify(compliance_status)
 
-# MDM Discovery (Optional for Azure testing)
-@app.route('/discover', methods=['GET'])
-def mdm_discovery():
-    print("HI")
-    enrollment_url="https://windowsmdm.sujanix.com/enroll"
-    requests.post(enrollment_url)
+
+@app.route('/EnrollmentServer/Discovery.svc', methods=['POST'])
+def discovery_service():
+    if request.content_type == "application/soap+xml":
+        # Create the SOAP response for device discovery
+        soap_response = """<?xml version="1.0" encoding="utf-8"?>
+        <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/">
+            <s:Body>
+                <DiscoveryResponse xmlns="http://schemas.microsoft.com/windows/management/2012/01/enrollment">
+                    <AuthPolicy>Federated</AuthPolicy>
+                    <EnrollmentVersion>5.0</EnrollmentVersion>
+                    <EnrollmentPolicyServiceUrl>https://windowsmdm.sujanix.com/EnrollmentServer/Policy.svc</EnrollmentPolicyServiceUrl>
+                    <EnrollmentServiceUrl>https://windowsmdm.sujanix.com/EnrollmentServer/Enroll.svc</EnrollmentServiceUrl>
+                    <TermsOfUseUrl>https://windowsmdm.sujanix.com/terms-of-use</TermsOfUseUrl>
+                    <ComplianceServiceUrl>https://windowsmdm.sujanix.com/EnrollmentServer/Compliance.svc</ComplianceServiceUrl>
+                </DiscoveryResponse>
+            </s:Body>
+        </s:Envelope>"""
+        # Return the SOAP response with appropriate content type
+        return Response(soap_response, content_type="application/soap+xml")
+
+    return "Invalid Request", 400
+
+
+@app.route('/EnrollmentServer/Enroll.svc', methods=['POST'])
+def enroll_service():
+    # Check if the request content type is SOAP
+    if request.content_type == "application/soap+xml":
+        try:
+            # Log the request body for debugging
+            app.logger.info(f"Incoming SOAP Request: {request.data.decode('utf-8')}")
+
+            # Parse and process the SOAP request here (use `xml.etree.ElementTree` or a SOAP library like `zeep` if needed)
+            soap_request = request.data.decode("utf-8")
+
+            # Example of extracting a device identifier (e.g., EmailAddress, DeviceType)
+            # You'll need to replace this with proper XML parsing
+            device_id = "12345100-DEVICE-ID"  # Replace with extracted or generated device ID
+
+            # Construct the SOAP response
+            soap_response = f"""<?xml version="1.0" encoding="utf-8"?>
+            <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/">
+                <s:Body>
+                    <EnrollResponse xmlns="http://schemas.microsoft.com/windows/management/2012/01/enrollment">
+                        <AuthPolicy>Federated</AuthPolicy>
+                        <EnrollmentVersion>5.0</EnrollmentVersion>
+                        <EnrollStatus>Success</EnrollStatus>
+                        <DeviceIdentifier>{device_id}</DeviceIdentifier>
+                        <ServerInfo>
+                            <EnrollServiceUrl>https://windowsmdm.sujanix.com/EnrollmentServer/Enroll.svc</EnrollServiceUrl>
+                            <PolicyServiceUrl>https://windowsmdm.sujanix.com/EnrollmentServer/Policy.svc</PolicyServiceUrl>
+                        </ServerInfo>
+                    </EnrollResponse>
+                </s:Body>
+            </s:Envelope>"""
+
+            return Response(soap_response, content_type="application/soap+xml")
+        except Exception as e:
+            # Handle errors and log them
+            app.logger.error(f"Error processing SOAP request: {str(e)}")
+            error_response = f"""<?xml version="1.0" encoding="utf-8"?>
+            <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/">
+                <s:Body>
+                    <s:Fault>
+                        <faultcode>s:Client</faultcode>
+                        <faultstring>Invalid Request</faultstring>
+                    </s:Fault>
+                </s:Body>
+            </s:Envelope>"""
+            return Response(error_response, content_type="application/soap+xml", status=500)
+    else:
+        return "Invalid Request: Content type must be application/soap+xml", 400
     
-    return jsonify({
-        "service_url": "https://windowsmdm.sujanix.com/enroll",
-        "terms_of_use_url": "https://windowsmdm.sujanix.com/terms-of-use",
-        "compliance_url": "https://windowsmdm.sujanix.com/compliance",
-         "enrollment_url": "https://windowsmdm.sujanix.com/enroll"
-    })
+    
+@app.route('/EnrollmentServer/Policy.svc', methods=['POST'])
+def policy_service():
+    # Check if the request content type is SOAP
+    if request.content_type == "application/soap+xml":
+        try:
+            # Log the request body for debugging
+            app.logger.info(f"Incoming SOAP Request: {request.data.decode('utf-8')}")
+
+            # Parse and process the SOAP request here (use `xml.etree.ElementTree` or a SOAP library)
+            soap_request = request.data.decode("utf-8")
+
+            # Example: Extract device ID or policy request details from the SOAP request
+            # Replace this with actual XML parsing logic
+            device_id = "12345100-DEVICE-ID"  # Replace with extracted device ID from the request
+
+            # Construct the SOAP response with policies
+            # You can dynamically populate policies based on the device or user identity
+            soap_response = f"""<?xml version="1.0" encoding="utf-8"?>
+            <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/">
+                <s:Body>
+                    <GetPoliciesResponse xmlns="http://schemas.microsoft.com/windows/management/2012/01/policy">
+                        <Policies>
+                            <Policy>
+                                <PolicyId>ExamplePolicy</PolicyId>
+                                <PolicyType>DeviceRestriction</PolicyType>
+                                <PolicyVersion>1.0</PolicyVersion>
+                                <PolicyData>
+                                    <Restrictions>
+                                        <AllowCamera>false</AllowCamera>
+                                        <AllowBluetooth>true</AllowBluetooth>
+                                    </Restrictions>
+                                </PolicyData>
+                            </Policy>
+                            <Policy>
+                                <PolicyId>PasswordPolicy</PolicyId>
+                                <PolicyType>Password</PolicyType>
+                                <PolicyVersion>2.0</PolicyVersion>
+                                <PolicyData>
+                                    <PasswordComplexity>High</PasswordComplexity>
+                                    <MinimumLength>8</MinimumLength>
+                                    <RequireSpecialCharacters>true</RequireSpecialCharacters>
+                                </PolicyData>
+                            </Policy>
+                        </Policies>
+                    </GetPoliciesResponse>
+                </s:Body>
+            </s:Envelope>"""
+
+            return Response(soap_response, content_type="application/soap+xml")
+
+        except Exception as e:
+            # Handle errors and log them
+            app.logger.error(f"Error processing SOAP request: {str(e)}")
+            error_response = f"""<?xml version="1.0" encoding="utf-8"?>
+            <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/">
+                <s:Body>
+                    <s:Fault>
+                        <faultcode>s:Client</faultcode>
+                        <faultstring>Invalid Request</faultstring>
+                    </s:Fault>
+                </s:Body>
+            </s:Envelope>"""
+            return Response(error_response, content_type="application/soap+xml", status=500)
+    else:
+        return "Invalid Request: Content type must be application/soap+xml", 400
+
+
+# MDM Discovery (Optional for Azure testing)
+# @app.route('/discover', methods=['GET'])
+# def mdm_discovery():
+#     print("HI")    
+#     return jsonify({
+#         "service_url": "https://windowsmdm.sujanix.com",
+#         "terms_of_use_url": "https://windowsmdm.sujanix.com/terms-of-use",
+#         "compliance_url": "https://windowsmdm.sujanix.com/compliance",
+#          "enrollment_url": "https://windowsmdm.sujanix.com/enroll"
+#     })
 
 @app.route('/enroll', methods=['POST'])
 def enroll():
