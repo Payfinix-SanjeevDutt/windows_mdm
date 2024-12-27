@@ -1,4 +1,5 @@
 from flask import Flask, request, jsonify, render_template, Response
+import base64
 from utils.graph_api import enroll_device, list_devices
 import xml.etree.ElementTree as ET
 import requests
@@ -33,7 +34,8 @@ def parse_soap_message(decoded_body):
     
     # Extract data (adjust based on the exact structure of the XML)
     for elem in root.iter():
-        print(f"{elem.tag}: {elem.text}")
+        print("Roottttttttttttttttt", f"{elem.tag}: {elem.text}")
+        print("\n")
     return root
 
 # Compliance Status
@@ -55,25 +57,38 @@ def compliance():
 
 @app.route('/EnrollmentServer/Discovery.svc', methods=['POST'])
 def discovery_service():
-    if request.content_type == "application/soap+xml":
-        # Create the SOAP response for device discovery
+    try:
+        print("Raw Request Body:", request.data)
+        print("Content-Type:", request.content_type)
+
+        decoded_body = request.data.decode('utf-8')
+        print("Decoded BODY:", decoded_body)
+
+        root = ET.fromstring(decoded_body)
+        for elem in root.iter():
+            print(f"{elem.tag}: {elem.text}")
+
         soap_response = """<?xml version="1.0" encoding="utf-8"?>
-        <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/">
+        <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" xmlns:w="http://schemas.microsoft.com/windows/management/2012/01/enrollment">
             <s:Body>
-                <DiscoveryResponse xmlns="http://schemas.microsoft.com/windows/management/2012/01/enrollment">
-                    <AuthPolicy>Federated</AuthPolicy>
-                    <EnrollmentVersion>5.0</EnrollmentVersion>
-                    <EnrollmentPolicyServiceUrl>https://windowsmdm.sujanix.com/EnrollmentServer/Policy.svc</EnrollmentPolicyServiceUrl>
-                    <EnrollmentServiceUrl>https://windowsmdm.sujanix.com/EnrollmentServer/Enroll.svc</EnrollmentServiceUrl>
-                    <TermsOfUseUrl>https://windowsmdm.sujanix.com/terms-of-use</TermsOfUseUrl>
-                    <ComplianceServiceUrl>https://windowsmdm.sujanix.com/EnrollmentServer/Compliance.svc</ComplianceServiceUrl>
-                </DiscoveryResponse>
+                <w:DiscoveryResponse>
+                    <w:AuthPolicy>Federated</w:AuthPolicy>
+                    <w:EnrollmentVersion>5.0</w:EnrollmentVersion>
+                    <w:EnrollmentPolicyServiceUrl>https://windowsmdm.sujanix.com/EnrollmentServer/Policy.svc</w:EnrollmentPolicyServiceUrl>
+                    <w:EnrollmentServiceUrl>https://windowsmdm.sujanix.com/EnrollmentServer/Enroll.svc</w:EnrollmentServiceUrl>
+                    <w:TermsOfUseUrl>https://windowsmdm.sujanix.com/terms-of-use</w:TermsOfUseUrl>
+                    <w:ComplianceServiceUrl>https://windowsmdm.sujanix.com/EnrollmentServer/Compliance.svc</w:ComplianceServiceUrl>
+                </w:DiscoveryResponse>
             </s:Body>
         </s:Envelope>"""
-        # Return the SOAP response with appropriate content type
+        print("soap_response...", soap_response)
         return Response(soap_response, content_type="application/soap+xml")
 
-    return "Invalid Request", 400
+    except Exception as e:
+        print("Error processing request:", e)
+        return "Error processing SOAP request", 500
+
+    # return "Invalid Request", 400
 
 
 @app.route('/EnrollmentServer/Enroll.svc', methods=['POST'])
