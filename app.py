@@ -14,7 +14,7 @@ def home():
         "message": "Welcome to theWindows MDM Server",
         "endpoints": {
             "discovery": "https://windowsmdm.sujanix.com/EnrollmentServer/Discovery.svc",
-            "terms_of_use": "https://windowsmdm.sujanix.com/EnrollmentServer/terms-of-use",
+            "terms_of_use": "https://windowsmdm.sujanix.com/EnrollmentServer/TermsofUse",
             "compliance": "https://windowsmdm.sujanix.comEnrollmentServer/Compliance.svc",
             "enrollment" : "https://windowsmdm.sujanix.com/EnrollmentServer/Enrollment.svc"
         },
