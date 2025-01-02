@@ -7,19 +7,19 @@ class Handler:
         pass
     def all_devices(self):
         try:
-            # Get the access token
+            
             access_token = get_access_token()
             
-            # Define the API endpoint and headers
+            
             graph_url = "https://graph.microsoft.com/v1.0/devices"
             headers = {
                 "Authorization": f"Bearer {access_token}"
             }
             
-            # Make the request to fetch devices
+        
             response = requests.get(graph_url, headers=headers)
             
-            # Handle the response
+            
             if response.status_code == 200:
                 devices = response.json()
                 return jsonify({"status": "success", "devices": devices}), 200
