@@ -11,7 +11,7 @@ def get_access_token():
         "scope":  "https://graph.microsoft.com/.default"
 
     }
-    # print("DATA>>>>>>>>>>", url , "VV",data)
+    # print("NEW_DATA>>>>>>>>>>", url , "VV",data)
     response = requests.post(url, data=data)
     
     response.raise_for_status()
@@ -28,7 +28,9 @@ def enroll_device(device_id):
 def list_devices():
     access_token = get_access_token()
     url = f"{Config.GRAPH_API_BASE_URL}/deviceManagement/managedDevices"
-    print("URL>", url)
+    # print("URL>", url)
+    # print("TOKENNN>", access_token)
     headers = {"Authorization": f"Bearer {access_token}"}
     response = requests.get(url, headers=headers)
+    # print("<<<RES>>>", response)
     return response.json()
