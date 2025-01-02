@@ -5,6 +5,7 @@ from utils.graph_api import enroll_device, list_devices
 import xml.etree.ElementTree as ET
 import requests
 from xml.etree.ElementTree import Element
+from config import Config
 
 app = Flask(__name__)
 
@@ -391,14 +392,81 @@ def enroll():
     # result = enroll_device(device_id)
     # return jsonify(result)
 
-@app.route('/devices', methods=['GET'])
-def devices():
-    result = list_devices()
-    return jsonify(result)
+# @app.route('/devices', methods=['GET'])
+# def devices():
+#     result = list_devices()
+#     return jsonify(result)
 
 @app.route('/status', methods=['GET'])
 def status():
     return jsonify({"status": "MDM server running"})
+
+
+
+
+
+
+
+
+def get_access_token():
+
+    
+    # Token endpoint URL
+    url = f"https://login.microsoftonline.com/{Config.TENANT_ID}/oauth2/v2.0/token"
+    data = {
+        "grant_type": "client_credentials",
+        "client_id":Config.CLIENT_ID,
+        "client_secret": Config.CLIENT_SECRET,
+        "scope": "https://graph.microsoft.com/.default"
+    }
+    response = requests.post(url, data=data)
+    if response.status_code == 200:
+        return response.json().get("access_token")
+    else:
+        raise Exception(f"Failed to fetch access token: {response.json()}")
+
+
+
+
+
+
+
+
+
+
+
+def list_devices():
+    try:
+        access_token = get_access_token()
+        graph_url = "https://graph.microsoft.com/v1.0/devices"
+        headers = {
+            "Authorization": f"Bearer {access_token}"
+        }
+        response = requests.get(graph_url, headers=headers)
+        if response.status_code == 200:
+            return response.json()  # This contains the list of devices
+        else:
+            return {"error": response.json()}
+    except Exception as e:
+        return {"error": str(e)}
+    
+    
+    
+@app.route('/devices', methods=['GET'])
+def devices():
+    """
+    Endpoint to fetch all devices from Azure AD.
+    """
+    try:
+        # Fetch devices using the helper function
+        devices = list_devices()
+        # If there's an error, handle it
+        if "error" in devices:
+            return jsonify({"status": "error", "details": devices["error"]}), 500
+        
+        return jsonify({"status": "success", "devices": devices}), 200
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
