@@ -42,7 +42,7 @@ def callback_handler():
 
 
 # Serve the Terms of Use
-@app.route('/EnrollmentServer/terms-of-use', methods=['GET'])
+@app.route('/EnrollmentServer/TermsofUse', methods=['GET'])
 def terms_of_use():
     return render_template('terms_of_use.html')
 
@@ -173,7 +173,7 @@ def auth_handler():
     html_content = f"""
     <h3>MDM Federated Login</h3>
     <form method="post" action="{appru}">
-        <p><input type="hidden" name="wresult" value="TODOSpecialTokenWhichVerifiesAuth" /></p>
+        <p><input type="hidden" name="wresult" value="TODOSpecialTokenWhichVerifiesAuth"/></p>
         <input type="submit" value="Login" />
     </form>
     """
