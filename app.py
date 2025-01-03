@@ -10,6 +10,9 @@ from xml.etree.ElementTree import Element
 from config import Config
 
 
+from blueprint import mdm_blueprint
+
+
 app = Flask(__name__)
 
 
@@ -559,11 +562,10 @@ def enroll():
     # result = enroll_device(device_id)
     # return jsonify(result)
 
-
-@app.route('/devices', methods=['GET'])
-def devices():
-    result = list_devices()
-    return jsonify(result)
+# @app.route('/devices', methods=['GET'])
+# def devices():
+#     result = list_devices()
+#     return jsonify(result)
 
 
 @app.route('/status', methods=['GET'])
@@ -571,5 +573,26 @@ def status():
     return jsonify({"status": "MDM server running"})
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 if __name__ == "__main__":
+    app.register_blueprint(mdm_blueprint)
     app.run(host="0.0.0.0", port=5000)
