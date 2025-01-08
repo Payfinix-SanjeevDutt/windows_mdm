@@ -34,3 +34,14 @@ def list_devices():
     response = requests.get(url, headers=headers)
     # print("<<<RES>>>", response)
     return response.json()
+
+
+def list_all_devcies():
+    access_token = get_access_token()
+    graph_url = "https://graph.microsoft.com/v1.0/devices"
+    headers = {
+                "Authorization": f"Bearer {access_token}"
+            }
+    response = requests.get(graph_url, headers=headers)
+    return response.json()
+    

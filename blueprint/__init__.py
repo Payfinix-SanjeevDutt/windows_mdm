@@ -1,1 +1,0 @@
-from blueprint.windowsblueprint import mdm_blueprint
