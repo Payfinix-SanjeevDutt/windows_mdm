@@ -1,4 +1,6 @@
 from flask import Flask, request, jsonify, render_template, Response, make_response, redirect, render_template_string
+from lxml import etree
+from jose import jwt, JOSEError
 from xml.etree.ElementTree import Element, SubElement, tostring, fromstring
 from utils.graph_api import *
 import uuid
@@ -11,6 +13,10 @@ import xml.etree.ElementTree as ET
 import requests
 from xml.etree.ElementTree import Element
 from config import Config
+from OpenSSL import crypto
+import json
+import re
+
 
 app = Flask(__name__)
 
@@ -115,12 +121,12 @@ def discovery_service():
                         <AuthenticationServiceUrl>
                             https://{domain}/AuthenticationService.svc
                         </AuthenticationServiceUrl>
+                        <EnrollmentPolicyServiceUrl>
+                           https://{domain}/ENROLLMENTSERVER/DEVICEENROLLMENTWEBSERVICE.SVC
+                        </EnrollmentPolicyServiceUrl>
                         <EnrollmentServiceUrl>
                             https://{domain}/EnrollmentServer/Enrollment.svc
                         </EnrollmentServiceUrl>
-                        <EnrollmentPolicyServiceUrl>
-                           https://{domain}/EnrollmentServer/Policies.svc
-                        </EnrollmentPolicyServiceUrl>
 
                     </DiscoverResult>
                 </DiscoverResponse>
@@ -218,83 +224,259 @@ def auth_callback():
     return f"Error fetching token: {token_response.text}", 500
 
 
-@app.route('/EnrollmentServer/Enrollment.svc', methods=['POST'])
-def enroll_service():
-    print("____________________ENROLLLL____________________________")
-    try:
-        soap_request = request.data.decode("utf-8")
+@app.route('/ENROLLMENTSERVER/DEVICEENROLLMENTWEBSERVICE.SVC', methods=['POST'])
+def enrollment_policy_service():
+     # Read the HTTP request body
+    body_raw = request.data
+    body = body_raw.decode('utf-8')
+    print("POLICY_BODY>>>>>>>>>>>>>>>>>>",body)
+    # Retrieve the MessageID from the body for the response
+    match = re.search(r'<a:MessageID>(.*?)<\/a:MessageID>', body)
+    if match:
+        message_id = match.group(1)
+    else:
+        return Response("Invalid request: MessageID not found", status=400)
+    print("POLICY_MSG_ID", message_id)
 
-        token_match = re.search(r'<wresult>(.*?)<\/wresult>', soap_request)
-        if not token_match:
-            return Response("Invalid Request: Token not found", status=400)
-        token = token_match.group(1)
+    # Create response payload
+    # response_payload = f"""
+    # <s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope" xmlns:a="http://www.w3.org/2005/08/addressing" xmlns:u="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-utility-1.0.xsd">
+    #     <s:Header>
+    #         <a:Action s:mustUnderstand="1">http://schemas.microsoft.com/windows/pki/2009/01/enrollmentpolicy/IPolicy/GetPoliciesResponse</a:Action>
+    #         <a:RelatesTo>{message_id}</a:RelatesTo>
+    #     </s:Header>
+    #     <s:Body xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+    #         <GetPoliciesResponse xmlns="http://schemas.microsoft.com/windows/pki/2009/01/enrollmentpolicy">
+    #             <xcep:response xsi:nil="true" />
+    #             <xcep:cAs xsi:nil="true" />
+    #             <xcep:oIDs xsi:nil="true" />
+    #         </GetPoliciesResponse>
+    #     </s:Body>
+    # </s:Envelope>
+    # """
+    response_payload = f""" 
+                        <s:Envelope
+                    xmlns:u="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-utility-1.0.xsd"
+                    xmlns:s="http://www.w3.org/2003/05/soap-envelope"
+                    xmlns:a="http://www.w3.org/2005/08/addressing">
+                    <s:Header>
+                        <a:Action s:mustUnderstand="1">
+                        http://schemas.microsoft.com/windows/pki/2009/01/enrollmentpolicy/IPolicy/GetPoliciesResponse
+                        </a:Action>
+                        <a:RelatesTo>{message_id}</a:RelatesTo>
+                    </s:Header>
+                    <s:Body xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                        xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+                        <GetPoliciesResponse
+                        xmlns="http://schemas.microsoft.com/windows/pki/2009/01/enrollmentpolicy">
+                        <response>
+                        <policyID />
+                            <policyFriendlyName xsi:nil="true"
+                            xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"/>
+                            <nextUpdateHours xsi:nil="true"
+                            xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"/>
+                            <policiesNotChanged xsi:nil="true"
+                            xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"/>
+                            <policies>
+                            <policy>
+                                <policyOIDReference>0</policyOIDReference>
+                                <cAs xsi:nil="true" />
+                                <attributes>
+                                <commonName>CEPUnitTest</commonName>
+                                <policySchema>3</policySchema>
+                                <certificateValidity>
+                                    <validityPeriodSeconds>1209600</validityPeriodSeconds>
+                                    <renewalPeriodSeconds>172800</renewalPeriodSeconds>
+                                </certificateValidity>
+                                <permission>
+                                    <enroll>true</enroll>
+                                    <autoEnroll>false</autoEnroll>
+                                </permission>
+                                <privateKeyAttributes>
+                                    <minimalKeyLength>2048</minimalKeyLength>
+                                    <keySpec xsi:nil="true" />
+                                    <keyUsageProperty xsi:nil="true" />
+                                    <permissions xsi:nil="true" />
+                                    <algorithmOIDReference xsi:nil="true" />
+                                    <cryptoProviders xsi:nil="true" />
+                                </privateKeyAttributes>
+                                <revision>
+                                    <majorRevision>101</majorRevision>
+                                    <minorRevision>0</minorRevision>
+                                </revision>
+                                <supersededPolicies xsi:nil="true" />
+                                <privateKeyFlags xsi:nil="true" />
+                                <subjectNameFlags xsi:nil="true" />
+                                <enrollmentFlags xsi:nil="true" />
+                                <generalFlags xsi:nil="true" />
+                                <hashAlgorithmOIDReference>0</hashAlgorithmOIDReference>
+                                <rARequirements xsi:nil="true" />
+                                <keyArchivalAttributes xsi:nil="true" />
+                                <extensions xsi:nil="true" />
+                                </attributes>
+                            </policy>
+                            </policies>
+                        </response>
+                        <cAs xsi:nil="true" />
+                        <oIDs>
+                            <oID>
+                            <value>1.3.14.3.2.29</value>
+                            <group>1</group>
+                            <oIDReferenceID>0</oIDReferenceID>
+                            <defaultName>szOID_OIWSEC_sha1RSASign</defaultName>
+                            </oID>
+                        </oIDs>
+                        </GetPoliciesResponse>
+                    </s:Body>
+                </s:Envelope>
+    
+                """
 
-        # Validate the token using Azure AD
-        tenant_id = Config.TENANT_ID
-        client_id = Config.CLIENT_ID
-        jwks_uri = f"https://login.microsoftonline.com/{tenant_id}/discovery/v2.0/keys"
-        keys = requests.get(jwks_uri).json().get("keys", [])
-
-        # Decode and validate the token
-        header = jwt.get_unverified_header(token)
-        key = next(k for k in keys if k["kid"] == header["kid"])
-        decoded_token = jwt.decode(
-            token,
-            jwk.construct(key),
-            audience=client_id,
-            issuer=f"https://login.microsoftonline.com/{tenant_id}/v2.0",
-            options={"verify_exp": True},
-        )
-
-        print("Decoded Token:", decoded_token)
-
-        # Proceed with enrollment if token is valid
-        soap_response = """<?xml version="1.0" encoding="utf-8"?>
-            <s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope" xmlns:w="http://schemas.microsoft.com/windows/management/2012/01/enrollment">
-                <s:Body>
-                    <w:EnrollmentResponse>
-                        <w:ResponseStatus>Success</w:ResponseStatus>
-                    </w:EnrollmentResponse>
-                </s:Body>
-            </s:Envelope>"""
-
-        return Response(soap_response, status=200, content_type="application/soap+xml; charset=utf-8")
-
-    except Exception as e:
-        print(f"Error processing enrollment: {str(e)}")
-        error_response = """<?xml version="1.0" encoding="utf-8"?>
-            <s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope">
-                <s:Body>
-                    <s:Fault>
-                        <faultcode>s:Client</faultcode>
-                        <faultstring>Invalid Token</faultstring>
-                    </s:Fault>
-                </s:Body>
-            </s:Envelope>"""
-        return Response(error_response, status=400, content_type="application/soap+xml")
-
-
-@app.route('/EnrollmentServer/Policies.svc', methods=['GET','POST'])
-def get_policies():
-    print("__POLICIES__________________", request.method)
-    policies = """<?xml version="1.0" encoding="utf-8"?>
-    <Policies>
-        <Policy>
-            <WiFi>
-                <SSID>vivo T3 Ultra</SSID>
-                <Password>suchet123</Password>
-            </WiFi>
-            <Compliance>
-                <PasswordRequired>True</PasswordRequired>
-                <EncryptionRequired>True</EncryptionRequired>
-            </Compliance>
-        </Policy>
-    </Policies>"""
-
-    response = make_response(policies)
-    response.headers['Content-Type'] = 'application/xml; charset=utf-8'
+    # Return the response
+    response = Response(response_payload, status=200)
+    response.headers['Content-Type'] = 'application/soap+xml; charset=utf-8'
+    response.headers['Content-Length'] = str(len(response_payload))
+    print("POLICY_RES____", response)
     return response
 
+def parse_xml_value(xml, pattern):
+    match = re.search(pattern, xml)
+    if match:
+        return match.group(1)
+    return None
+
+@app.route('/EnrollmentServer/Enrollment.svc', methods=['POST'])
+def enroll_service():
+    print("NEW____ENROLLMENT_API___________")
+    
+    try:
+        # Parse the incoming SOAP request
+        envelope = ET.fromstring(request.data)
+        
+        # Extract the BinarySecurityToken
+        binary_security_token_element = envelope.find(
+            './/{http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd}BinarySecurityToken'
+        )
+        if binary_security_token_element is None:
+            return "BinarySecurityToken not found", 400
+        
+        binary_security_token = binary_security_token_element.text.strip()
+        print("binary_security_token----------", binary_security_token)
+        
+        # Decode the BinarySecurityToken
+        try:
+            decoded_token = base64.b64decode(binary_security_token)
+            print("decoded_token-------", decoded_token)
+        except Exception as e:
+            print("Error decoding token:", e)
+            return "Invalid token format", 400
+        
+        # Attempt to decode as JWT
+        try:
+            jwt_decoded = jwt.decode(decoded_token, options={"verify_signature": False})
+            print("JWT Decoded:", jwt_decoded)
+        except JOSEError as e:
+            print("JWT Decode Error:", e)
+            return "Invalid JWT token", 400
+        
+        # Extract and print the username claim (if available)
+        username = jwt_decoded.get("username") or jwt_decoded.get("sub")  # Adjust based on your JWT structure
+        print(f"Username from JWT: {username}")
+        
+        # TODO: Authenticate the client using the extracted username and other claims
+        
+        # Generate the response (same as before)
+        response = f"""
+        <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+           xmlns:a="http://www.w3.org/2005/08/addressing"
+           xmlns:u="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-utility-1.0.xsd">
+           <s:Header>
+              <a:Action s:mustUnderstand="1">
+                 http://schemas.microsoft.com/windows/pki/2009/01/enrollment/RSTRC/wstep
+              </a:Action>
+              <a:RelatesTo>urn:uuid:sample-uuid</a:RelatesTo>
+           </s:Header>
+           <s:Body>
+              <RequestSecurityTokenResponseCollection xmlns="http://docs.oasis-open.org/ws-sx/ws-trust/200512">
+                 <RequestSecurityTokenResponse>
+                    <TokenType>
+                        http://schemas.microsoft.com/5.0.0.0/ConfigurationManager/Enrollment/DeviceEnrollmentToken
+                    </TokenType>
+                    <RequestedSecurityToken>
+                       <BinarySecurityToken
+                          ValueType="http://schemas.microsoft.com/5.0.0.0/ConfigurationManager/Enrollment/DeviceEnrollmentProvisionDoc"
+                          EncodingType="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd#base64binary"
+                          xmlns="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd">
+                          {base64.b64encode(b'SampleProvisioningXML').decode('utf-8')}
+                       </BinarySecurityToken>
+                    </RequestedSecurityToken>
+                    <RequestID>0</RequestID>
+                 </RequestSecurityTokenResponse>
+              </RequestSecurityTokenResponseCollection>
+           </s:Body>
+        </s:Envelope>
+        """
+        
+        print("RESPONSE_ENROLLMENT>>>>", response)
+        return Response(response, mimetype='application/soap+xml')
+    
+    except Exception as e:
+        print("Error processing the request:", e)
+        return "Internal Server Error", 500
+    
+    # print("____ENROLLMENT___APIII___________")
+    # envelope = ET.fromstring(request.data)
+    # binary_security_token = envelope.find(
+    #     './/{http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd}BinarySecurityToken'
+    # ).text.strip()
+    
+    # print("binary_security_token----------", binary_security_token)
+ 
+    # decoded_token = base64.b64decode(binary_security_token)
+    # print("decoded_token-------", decoded_token)
+    
+    # credentials = decoded_token.decode('utf-8')
+    # print("credentials-------", credentials)
+    
+    # username, password = credentials.split(':')
+    # print(f"Username: {username}, Password: {password}")
+    
+    # # TODO: Authenticate the client using the extracted username and password
+    # response = f"""
+    # <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+    #    xmlns:a="http://www.w3.org/2005/08/addressing"
+    #    xmlns:u="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-utility-1.0.xsd">
+    #    <s:Header>
+    #       <a:Action s:mustUnderstand="1">
+    #          http://schemas.microsoft.com/windows/pki/2009/01/enrollment/RSTRC/wstep
+    #       </a:Action>
+    #       <a:RelatesTo>urn:uuid:sample-uuid</a:RelatesTo>
+    #    </s:Header>
+    #    <s:Body>
+    #       <RequestSecurityTokenResponseCollection xmlns="http://docs.oasis-open.org/ws-sx/ws-trust/200512">
+    #          <RequestSecurityTokenResponse>
+    #             <TokenType>
+    #                 http://schemas.microsoft.com/5.0.0.0/ConfigurationManager/Enrollment/DeviceEnrollmentToken
+    #             </TokenType>
+    #             <RequestedSecurityToken>
+    #                <BinarySecurityToken
+    #                   ValueType="http://schemas.microsoft.com/5.0.0.0/ConfigurationManager/Enrollment/DeviceEnrollmentProvisionDoc"
+    #                   EncodingType="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd#base64binary"
+    #                   xmlns="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd">
+    #                   {base64.b64encode(b'SampleProvisioningXML').decode('utf-8')}
+    #                </BinarySecurityToken>
+    #             </RequestedSecurityToken>
+    #             <RequestID>0</RequestID>
+    #          </RequestSecurityTokenResponse>
+    #       </RequestSecurityTokenResponseCollection>
+    #    </s:Body>
+    # </s:Envelope>
+    # """
+    
+    # print("RESPONSE_ENROLLMENT>>>>", response)
+    # return Response(response, mimetype='application/soap+xml')
+    
+    
 @app.route('/devices', methods=['GET'])
 def devices():
     result = list_devices()
