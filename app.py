@@ -3,6 +3,8 @@ from lxml import etree
 from jose import jwt, JOSEError
 from xml.etree.ElementTree import Element, SubElement, tostring, fromstring
 from utils.graph_api import *
+import random
+from datetime import datetime, timedelta, timezone
 import uuid
 import base64
 from jose import jwt, jwk
@@ -16,6 +18,14 @@ from config import Config
 from OpenSSL import crypto
 import json
 import re
+import hashlib
+from cryptography import x509
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives.asymmetric.padding import PKCS1v15
+from cryptography.x509 import Certificate, CertificateSigningRequest, NameOID
+from cryptography.hazmat.primitives.hashes import SHA1
+
 
 
 app = Flask(__name__)
@@ -238,22 +248,6 @@ def enrollment_policy_service():
         return Response("Invalid request: MessageID not found", status=400)
     print("POLICY_MSG_ID", message_id)
 
-    # Create response payload
-    # response_payload = f"""
-    # <s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope" xmlns:a="http://www.w3.org/2005/08/addressing" xmlns:u="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-utility-1.0.xsd">
-    #     <s:Header>
-    #         <a:Action s:mustUnderstand="1">http://schemas.microsoft.com/windows/pki/2009/01/enrollmentpolicy/IPolicy/GetPoliciesResponse</a:Action>
-    #         <a:RelatesTo>{message_id}</a:RelatesTo>
-    #     </s:Header>
-    #     <s:Body xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
-    #         <GetPoliciesResponse xmlns="http://schemas.microsoft.com/windows/pki/2009/01/enrollmentpolicy">
-    #             <xcep:response xsi:nil="true" />
-    #             <xcep:cAs xsi:nil="true" />
-    #             <xcep:oIDs xsi:nil="true" />
-    #         </GetPoliciesResponse>
-    #     </s:Body>
-    # </s:Envelope>
-    # """
     response_payload = f""" 
                         <s:Envelope
                     xmlns:u="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-utility-1.0.xsd"
@@ -346,136 +340,146 @@ def parse_xml_value(xml, pattern):
     return None
 
 @app.route('/EnrollmentServer/Enrollment.svc', methods=['POST'])
-def enroll_service():
-    print("NEW____ENROLLMENT_API___________")
-    
+def enroll_handler():
     try:
-        # Parse the incoming SOAP request
-        envelope = ET.fromstring(request.data)
-        
-        # Extract the BinarySecurityToken
-        binary_security_token_element = envelope.find(
-            './/{http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd}BinarySecurityToken'
+        # Read the HTTP request body
+        body = request.data.decode('utf-8')
+
+        # Extract MessageID from the body
+        message_id_match = re.search(r'<a:MessageID>(.*?)</a:MessageID>', body)
+        if not message_id_match:
+            return Response("MessageID not found", status=400)
+        message_id = message_id_match.group(1)
+        print("ENNN___message_id",message_id,)
+        # Extract BinarySecurityToken (contains CSR) from the body
+        binary_security_token_match = re.search(
+            r'<wsse:BinarySecurityToken .*?>(.*?)</wsse:BinarySecurityToken>', body
         )
-        if binary_security_token_element is None:
-            return "BinarySecurityToken not found", 400
-        
-        binary_security_token = binary_security_token_element.text.strip()
-        print("binary_security_token----------", binary_security_token)
-        
-        # Decode the BinarySecurityToken
-        try:
-            decoded_token = base64.b64decode(binary_security_token)
-            print("decoded_token-------", decoded_token)
-        except Exception as e:
-            print("Error decoding token:", e)
-            return "Invalid token format", 400
-        
-        # Attempt to decode as JWT
-        try:
-            jwt_decoded = jwt.decode(decoded_token, options={"verify_signature": False})
-            print("JWT Decoded:", jwt_decoded)
-        except JOSEError as e:
-            print("JWT Decode Error:", e)
-            return "Invalid JWT token", 400
-        
-        # Extract and print the username claim (if available)
-        username = jwt_decoded.get("username") or jwt_decoded.get("sub")  # Adjust based on your JWT structure
-        print(f"Username from JWT: {username}")
-        
-        # TODO: Authenticate the client using the extracted username and other claims
-        
-        # Generate the response (same as before)
-        response = f"""
-        <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
-           xmlns:a="http://www.w3.org/2005/08/addressing"
-           xmlns:u="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-utility-1.0.xsd">
-           <s:Header>
-              <a:Action s:mustUnderstand="1">
-                 http://schemas.microsoft.com/windows/pki/2009/01/enrollment/RSTRC/wstep
-              </a:Action>
-              <a:RelatesTo>urn:uuid:sample-uuid</a:RelatesTo>
-           </s:Header>
-           <s:Body>
-              <RequestSecurityTokenResponseCollection xmlns="http://docs.oasis-open.org/ws-sx/ws-trust/200512">
-                 <RequestSecurityTokenResponse>
-                    <TokenType>
-                        http://schemas.microsoft.com/5.0.0.0/ConfigurationManager/Enrollment/DeviceEnrollmentToken
-                    </TokenType>
-                    <RequestedSecurityToken>
-                       <BinarySecurityToken
-                          ValueType="http://schemas.microsoft.com/5.0.0.0/ConfigurationManager/Enrollment/DeviceEnrollmentProvisionDoc"
-                          EncodingType="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd#base64binary"
-                          xmlns="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd">
-                          {base64.b64encode(b'SampleProvisioningXML').decode('utf-8')}
-                       </BinarySecurityToken>
-                    </RequestedSecurityToken>
-                    <RequestID>0</RequestID>
-                 </RequestSecurityTokenResponse>
-              </RequestSecurityTokenResponseCollection>
-           </s:Body>
-        </s:Envelope>
-        """
-        
-        print("RESPONSE_ENROLLMENT>>>>", response)
-        return Response(response, mimetype='application/soap+xml')
-    
+        if not binary_security_token_match:
+            return Response("BinarySecurityToken not found", status=400)
+        binary_security_token = binary_security_token_match.group(1)
+        print("ENNN__binary_security_token", binary_security_token)
+
+        # Extract DeviceID from the body
+        device_id_match = re.search(
+            r'<ac:ContextItem Name="DeviceID"><ac:Value>(.*?)</ac:Value></ac:ContextItem>', body
+        )
+        if not device_id_match:
+            return Response("DeviceID not found", status=400)
+        device_id = device_id_match.group(1)
+        print("ENNN___device_id", device_id)
+        # Extract EnrollmentType from the body
+        enrollment_type_match = re.search(
+            r'<ac:ContextItem Name="EnrollmentType"><ac:Value>(.*?)</ac:Value></ac:ContextItem>', body
+        )
+        print("ENN__enrollment_type_match", enrollment_type_match)
+        if not enrollment_type_match:
+            return Response("EnrollmentType not found", status=400)
+        enrollment_type = enrollment_type_match.group(1)
+        print("ENNN____enrollment_type", enrollment_type)
+
+        # Load Root CA certificate and private key
+        with open('identity (1).crt', 'rb') as f:
+            root_cert_data = f.read()
+        with open('identity (1).key', 'rb') as f:
+            root_key_data = f.read()
+
+        root_cert = x509.load_pem_x509_certificate(root_cert_data, default_backend())
+        root_private_key = serialization.load_pem_private_key(root_key_data, password=None, backend=default_backend())
+        print("TILL___HERE")
+        # Decode Base64 CSR
+        csr_data = base64.b64decode(binary_security_token)
+        csr = x509.load_pem_x509_csr(csr_data, default_backend())
+
+        # Verify CSR signature
+        if not csr.is_signature_valid:
+            return Response("Invalid CSR signature", status=400)
+
+        # Generate client certificate
+        now = datetime.now(timezone.utc)
+        not_before = now - timedelta(minutes=random.randint(0, 120))
+        not_after = not_before + timedelta(days=365)
+        client_cert = (
+            x509.CertificateBuilder()
+            .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, device_id)]))
+            .issuer_name(root_cert.subject)
+            .public_key(csr.public_key())
+            .serial_number(x509.random_serial_number())
+            .not_valid_before(not_before)
+            .not_valid_after(not_after)
+            .add_extension(x509.KeyUsage(digital_signature=True, key_encipherment=False, content_commitment=False,
+                                        key_agreement=False, data_encipherment=False, key_cert_sign=False, crl_sign=False, encipher_only=False, decipher_only=False),
+                          critical=True)
+            .add_extension(x509.ExtendedKeyUsage([x509.ExtendedKeyUsageOID.CLIENT_AUTH]), critical=True)
+            .sign(private_key=root_private_key, algorithm=SHA1(), backend=default_backend())
+        )
+
+        client_cert_data = client_cert.public_bytes(serialization.Encoding.DER)
+        print("client_cert_data----", client_cert_data)
+
+        # Generate fingerprints (SHA-1)
+        signed_client_cert_fingerprint = hashlib.sha1(client_cert_data).hexdigest().upper()
+        root_cert_fingerprint = hashlib.sha1(root_cert_data).hexdigest().upper()
+
+        # Determine cert store type
+        cert_store = "System" if enrollment_type == "Device" else "User"
+
+        # Generate WAP provisioning profile
+        wap_provision_profile = f'''<?xml version="1.0" encoding="UTF-8"?>
+        <wap-provisioningdoc version="1.1">
+            <characteristic type="CertificateStore">
+                <characteristic type="Root">
+                    <characteristic type="System">
+                        <characteristic type="{root_cert_fingerprint}">
+                            <parm name="EncodedCertificate" value="{base64.b64encode(root_cert_data).decode('utf-8')}" />
+                        </characteristic>
+                    </characteristic>
+                </characteristic>
+                <characteristic type="My">
+                    <characteristic type="{cert_store}">
+                        <characteristic type="{signed_client_cert_fingerprint}">
+                            <parm name="EncodedCertificate" value="{base64.b64encode(client_cert_data).decode('utf-8')}" />
+                        </characteristic>
+                        <characteristic type="PrivateKeyContainer" />
+                    </characteristic>
+                </characteristic>
+            </characteristic>
+            <characteristic type="APPLICATION">
+                <parm name="APPID" value="w7" />
+                <parm name="PROVIDER-ID" value="DEMO MDM" />
+                <parm name="NAME" value="Windows MDM Demo Server" />
+                <parm name="ADDR" value="https://example.com/ManagementServer/MDM.svc" />
+                <parm name="ServerList" value="https://example.com/ManagementServer/ServerList.svc" />
+                <parm name="ROLE" value="4294967295" />
+                <parm name="DEFAULTENCODING" value="application/vnd.syncml.dm+xml" />
+            </characteristic>
+        </wap-provisioningdoc>'''
+
+        # Generate SOAP response
+        response_payload = f'''<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"
+            xmlns:a="http://www.w3.org/2005/08/addressing"
+            xmlns:u="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-utility-1.0.xsd">
+            <s:Header>
+                <a:Action s:mustUnderstand="1">http://schemas.microsoft.com/windows/pki/2009/01/enrollment/RSTRC/wstep</a:Action>
+                <a:RelatesTo>{message_id}</a:RelatesTo>
+            </s:Header>
+            <s:Body>
+                <RequestSecurityTokenResponseCollection xmlns="http://docs.oasis-open.org/ws-sx/ws-trust/200512">
+                    <RequestSecurityTokenResponse>
+                        <TokenType>http://schemas.microsoft.com/5.0.0.0/ConfigurationManager/Enrollment/DeviceEnrollmentToken</TokenType>
+                        <RequestedSecurityToken>
+                            <BinarySecurityToken xmlns="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd" ValueType="http://schemas.microsoft.com/5.0.0.0/ConfigurationManager/Enrollment/DeviceEnrollmentProvisionDoc" EncodingType="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd#base64binary">{base64.b64encode(wap_provision_profile.encode('utf-8')).decode('utf-8')}</BinarySecurityToken>
+                        </RequestedSecurityToken>
+                        <RequestID xmlns="http://schemas.microsoft.com/windows/pki/2009/01/enrollment">0</RequestID>
+                    </RequestSecurityTokenResponse>
+                </RequestSecurityTokenResponseCollection>
+            </s:Body>
+        </s:Envelope>'''
+        print("ENNN___RES____response_payload", response_payload)
+        return Response(response_payload, content_type="application/soap+xml; charset=utf-8")
+
     except Exception as e:
-        print("Error processing the request:", e)
-        return "Internal Server Error", 500
-    
-    # print("____ENROLLMENT___APIII___________")
-    # envelope = ET.fromstring(request.data)
-    # binary_security_token = envelope.find(
-    #     './/{http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd}BinarySecurityToken'
-    # ).text.strip()
-    
-    # print("binary_security_token----------", binary_security_token)
- 
-    # decoded_token = base64.b64decode(binary_security_token)
-    # print("decoded_token-------", decoded_token)
-    
-    # credentials = decoded_token.decode('utf-8')
-    # print("credentials-------", credentials)
-    
-    # username, password = credentials.split(':')
-    # print(f"Username: {username}, Password: {password}")
-    
-    # # TODO: Authenticate the client using the extracted username and password
-    # response = f"""
-    # <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
-    #    xmlns:a="http://www.w3.org/2005/08/addressing"
-    #    xmlns:u="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-utility-1.0.xsd">
-    #    <s:Header>
-    #       <a:Action s:mustUnderstand="1">
-    #          http://schemas.microsoft.com/windows/pki/2009/01/enrollment/RSTRC/wstep
-    #       </a:Action>
-    #       <a:RelatesTo>urn:uuid:sample-uuid</a:RelatesTo>
-    #    </s:Header>
-    #    <s:Body>
-    #       <RequestSecurityTokenResponseCollection xmlns="http://docs.oasis-open.org/ws-sx/ws-trust/200512">
-    #          <RequestSecurityTokenResponse>
-    #             <TokenType>
-    #                 http://schemas.microsoft.com/5.0.0.0/ConfigurationManager/Enrollment/DeviceEnrollmentToken
-    #             </TokenType>
-    #             <RequestedSecurityToken>
-    #                <BinarySecurityToken
-    #                   ValueType="http://schemas.microsoft.com/5.0.0.0/ConfigurationManager/Enrollment/DeviceEnrollmentProvisionDoc"
-    #                   EncodingType="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd#base64binary"
-    #                   xmlns="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd">
-    #                   {base64.b64encode(b'SampleProvisioningXML').decode('utf-8')}
-    #                </BinarySecurityToken>
-    #             </RequestedSecurityToken>
-    #             <RequestID>0</RequestID>
-    #          </RequestSecurityTokenResponse>
-    #       </RequestSecurityTokenResponseCollection>
-    #    </s:Body>
-    # </s:Envelope>
-    # """
-    
-    # print("RESPONSE_ENROLLMENT>>>>", response)
-    # return Response(response, mimetype='application/soap+xml')
-    
+        return Response(f"Error: {str(e)}", status=500)
     
 @app.route('/devices', methods=['GET'])
 def devices():
