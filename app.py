@@ -1,7 +1,10 @@
 from flask import Flask, request, jsonify, render_template, Response, redirect, render_template_string
+from jose import jwt, JOSEError
+import hashlib
+from xml.etree.ElementTree import Element, SubElement, tostring, fromstring
 from lxml import etree
 from xml.etree.ElementTree import fromstring
-from datetime import datetime, timedelta
+from datetime import datetime, timezone, timedelta
 import uuid
 import base64
 import re
@@ -14,6 +17,29 @@ import json
 app = Flask(__name__)
 
 @app.route("/")
+
+def read_certificate(cert_path, key_path):
+    with open(cert_path, "rb") as cert_file:
+        cert = cert_file.read()
+    with open(key_path, "rb") as key_file:
+        key = key_file.read()
+    return cert, key
+ 
+ 
+def create_signed_certificate(csr_raw, root_cert, root_key, device_id):
+    # Parse the CSR (assumed to be in DER format)
+    csr = crypto.load_certificate_request(crypto.FILETYPE_ASN1, csr_raw)
+    # Create a new certificate
+    cert = crypto.X509()
+    cert.set_serial_number(int(uuid.uuid4().int >> 64))  # Random serial number
+    cert.gmtime_adj_notBefore(0)
+    cert.gmtime_adj_notAfter(365 * 24 * 60 * 60)  # 1 year validity
+    cert.set_issuer(root_cert.get_subject())
+    cert.set_subject(csr.get_subject())
+    cert.set_pubkey(csr.get_pubkey())
+    cert.sign(root_key, "sha256")
+    return crypto.dump_certificate(crypto.FILETYPE_ASN1, cert)
+
 def home():
     return jsonify({
         "message": "Welcome to the Windows MDM Server",
@@ -24,6 +50,7 @@ def home():
             "enrollment": "https://windowsmdm.sujanix.com/EnrollmentServer/Enrollment.svc"
         },
     })
+    
 
 @app.route('/EnrollmentServer/TermsofUse', methods=['GET'])
 def terms_of_use():
@@ -275,7 +302,7 @@ def enrollment_service():
         cert_request_base64 = cert_req_match.group(1).strip()
         print("Extracted PKCS#10 Request (Base64):", cert_request_base64)
         
-        with open("mdmserver.crt", "rb") as f:
+        with open("testserver.crt", "rb") as f:
             pem_data = f.read()
             
         # Convert PEM to DER format
@@ -284,23 +311,7 @@ def enrollment_service():
         
         # Base64-encode the DER certificate
         cert_der_b64 = base64.b64encode(der_data).decode('utf-8')
-            
-
-        # Simulate certificate issuance.
-        # dummy_cert = """-----BEGIN CERTIFICATE-----
-        #                     MIIDdzCCAl+gAwIBAgIEbdummyTANBgkqhkiG9w0BAQsFADBvMQswCQYDVQQGEwJV
-        #                     UzELMAkGA1UECBMCQ0ExEjAQBgNVBAcTCVNhbiBEaWVnbzEVMBMGA1UEChMMRXhh
-        #                     bXBsZSBJbmMuMRowGAYDVQQDExF3aW5kb3dzbWRtLnN1amFuaXguY29tMB4XDTE5
-        #                     MDkwMTAwMDAwMFoXDTIwMDkwMTAwMDAwMFowbzELMAkGA1UEBhMCVVMxCzAJBgNV
-        #                     BAgTAkNBMRIwEAYDVQQHEwlTYW4gRGllZ28xFTATBgNVBAoTDEV4YW1wbGUgSW5j
-        #                     LjEaMBgGA1UEAxMRd2luZG93c21kbS5zdWphbml4LmNvbTCCASIwDQYJKoZIhvcN
-        #                     AQEBBQADggEPADCCAQoCggEBANeDqD1JkE9dummyXjYqQF5KU7E3x9+rykV3P8LrX8Kb05HTO/rbTRgqYJZvQWbEx1Xmsrt0xVhF3x3KoyA9MzIDnDnPqR8rd3sD8PJ/EXAMPLEdummyOGWqqYoJ0bS4qI7I59f81DlRhJN8t+PF8Ydu+6vFYWYIw
-        #                     vBvIG/Jo6QkU+qeVkK6RzPLp6Ifdd3l4U4iUroTKOeVy1GEXAMPLEdummyOax4K3
-        #                     zAxnOMD9kzcUzScCgYEA1M6xY3nD0uZC/ZPfVFx5wIDAQABo1AwTjAdBgNVHQ4E
-        #                     FgQUdummyCERTIFICATEdummyY8cwHwYDVR0jBBgwFoAUdummyCERTIFICATEdummy4cw
-        #                     DAYDVR0TBAUwAwEB/zANBgkqhkiG9w0BAQsFAAOCAQEAe6A+dummyCERTIFICATEdummy
-        #                 -----END CERTIFICATE-----"""
-        # dummy_cert_base64 = base64.b64encode(dummy_cert.encode('utf-8')).decode('utf-8')
+        
         print("Dummy Certificate (Base64):", cert_der_b64)
 
         provisioning_xml = f"""<wap-provisioningdoc version="1.1">
@@ -326,8 +337,8 @@ def enrollment_service():
         message_id = message_id_match.group(1) if message_id_match else str(uuid.uuid4())
 
         # Create Timestamp values for the Security header.
-        created_time = datetime.utcnow().isoformat() + "Z"
-        expires_time = (datetime.utcnow() + timedelta(minutes=5)).isoformat() + "Z"
+        created_time = datetime.now(timezone.utc).isoformat()
+        expires_time = (datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat()
 
         # Build the SOAP response (RSTR) with Security header.
         response_payload = f"""<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
@@ -369,6 +380,7 @@ def enrollment_service():
     except Exception as e:
         print("Error in Enrollment Service:", str(e))
         return Response(f"Internal Server Error: {str(e)}", status=500)
+
     
 @app.route('/devices', methods=['GET'])
 def devices():
