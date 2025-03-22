@@ -1,10 +1,19 @@
 from flask import Flask, request, jsonify, render_template, Response, redirect, render_template_string
+import random
+from cryptography import x509
+import cryptography
+from cryptography.hazmat.backends import default_backend
+from cryptography.x509.oid import NameOID, ExtendedKeyUsageOID
+from datetime import datetime, timedelta, timezone
+from cryptography.hazmat.primitives.asymmetric import padding
+from cryptography.hazmat.primitives import hashes
+from xml.etree.ElementTree import Element, SubElement, tostring, fromstring
+from cryptography.hazmat.primitives import serialization
 from jose import jwt, JOSEError
 import hashlib
 from xml.etree.ElementTree import Element, SubElement, tostring, fromstring
 from lxml import etree
 from xml.etree.ElementTree import fromstring
-from datetime import datetime, timezone, timedelta
 import uuid
 import base64
 import re
@@ -17,28 +26,6 @@ import json
 app = Flask(__name__)
 
 @app.route("/")
-
-def read_certificate(cert_path, key_path):
-    with open(cert_path, "rb") as cert_file:
-        cert = cert_file.read()
-    with open(key_path, "rb") as key_file:
-        key = key_file.read()
-    return cert, key
- 
- 
-def create_signed_certificate(csr_raw, root_cert, root_key, device_id):
-    # Parse the CSR (assumed to be in DER format)
-    csr = crypto.load_certificate_request(crypto.FILETYPE_ASN1, csr_raw)
-    # Create a new certificate
-    cert = crypto.X509()
-    cert.set_serial_number(int(uuid.uuid4().int >> 64))  # Random serial number
-    cert.gmtime_adj_notBefore(0)
-    cert.gmtime_adj_notAfter(365 * 24 * 60 * 60)  # 1 year validity
-    cert.set_issuer(root_cert.get_subject())
-    cert.set_subject(csr.get_subject())
-    cert.set_pubkey(csr.get_pubkey())
-    cert.sign(root_key, "sha256")
-    return crypto.dump_certificate(crypto.FILETYPE_ASN1, cert)
 
 def home():
     return jsonify({
@@ -113,9 +100,9 @@ def discovery_service():
             <DiscoverResult>
                 <AuthPolicy>{auth_policy}</AuthPolicy>
                 <EnrollmentVersion>3.0</EnrollmentVersion>
-                <AuthenticationServiceUrl>https://{domain}/AuthenticationService.svc</AuthenticationServiceUrl>
-                <EnrollmentPolicyServiceUrl>https://{domain}/ENROLLMENTSERVER/DEVICEENROLLMENTWEBSERVICE.SVC</EnrollmentPolicyServiceUrl>
-                <EnrollmentServiceUrl>https://{domain}/EnrollmentServer/Enrollment.svc</EnrollmentServiceUrl>
+                <AuthenticationServiceUrl>https://windowsmdm.sujanix.com/AuthenticationService.svc</AuthenticationServiceUrl>
+                <EnrollmentPolicyServiceUrl>https://windowsmdm.sujanix.com/ENROLLMENTSERVER/DEVICEENROLLMENTWEBSERVICE.SVC</EnrollmentPolicyServiceUrl>
+                <EnrollmentServiceUrl>https://windowsmdm.sujanix.com/EnrollmentServer/Enrollment.svc</EnrollmentServiceUrl>
             </DiscoverResult>
             </DiscoverResponse>
         </s:Body>
@@ -287,100 +274,532 @@ def enrollment_policy_service():
     print("Enrollment Policy Response:", response)
     return response
 
-@app.route('/EnrollmentServer/Enrollment.svc', methods=['POST'])
-def enrollment_service():
+
+
+def extract_message_id(xml_str):
+    root = etree.fromstring(xml_str)
+    ns = {"a": "http://www.w3.org/2005/08/addressing"}
+    message_id = root.find(".//a:MessageID", namespaces=ns)
+    return message_id.text if message_id is not None else str(uuid.uuid4())
+
+def extract_pkcs10(xml_str):
+    root = etree.fromstring(xml_str)
+    ns = {
+        "wsse": "http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd"
+    }
+    token_elem = root.find(
+        ".//wsse:BinarySecurityToken[@ValueType='http://schemas.microsoft.com/windows/pki/2009/01/enrollment#PKCS10']",
+        namespaces=ns
+    )
+    return token_elem.text.strip() if token_elem is not None else None
+
+def load_certificate(cert_path):
+    """Load your self-signed certificate from file."""
     try:
-        request_xml = request.data.decode('utf-8')
-        print("Enrollment Service Request:", request_xml)
+        with open(cert_path, 'rb') as f:
+            cert_data = f.read()
+        # Remove any extra whitespace/newlines if needed.
+        return cert_data.decode('utf-8')
+    except Exception as e:
+        app.logger.exception("Error loading certificate file:")
+        return None
 
-        # Extract the PKCS#10 certificate request from the SOAP body.
-        cert_req_match = re.search(
-            r'<wsse:BinarySecurityToken[^>]*>(.*?)<\/wsse:BinarySecurityToken>',
-            request_xml, re.DOTALL)
-        if not cert_req_match:
-            return Response("Invalid enrollment request: Certificate request not found", status=400)
-        cert_request_base64 = cert_req_match.group(1).strip()
-        print("Extracted PKCS#10 Request (Base64):", cert_request_base64)
-        
-        with open("testserver.crt", "rb") as f:
-            pem_data = f.read()
-            
-        # Convert PEM to DER format
-        cert = crypto.load_certificate(crypto.FILETYPE_PEM, pem_data)
-        der_data = crypto.dump_certificate(crypto.FILETYPE_ASN1, cert)
-        
-        # Base64-encode the DER certificate
-        cert_der_b64 = base64.b64encode(der_data).decode('utf-8')
-        
-        print("Dummy Certificate (Base64):", cert_der_b64)
+def generate_provisioning_xml(cert_str):
+    """
+    Build a simple OMA provisioning XML that includes the certificate.
+    The certificate is expected to be in PEM format.
+    """
+    # Base64-encode the certificate contents if needed.
+    # (Sometimes the certificate might already be Base64-encoded between PEM headers.)
+    # For example, you might remove the header/footer first.
+    # Here we simply base64 encode the entire file.
+    b64_cert = base64.b64encode(cert_str.encode()).decode()
+    provisioning_xml = f"""<?xml version="1.0" encoding="utf-8"?>
+                        <wap-provisioningdoc version="1.1">
+                        <characteristic type="CertificateStore">
+                            <characteristic type="Root">
+                            <characteristic type="System">
+                                <characteristic type="ProvisionedRootCert">
+                                <parm name="EncodedCertificate" value="{b64_cert}" />
+                                </characteristic>
+                            </characteristic>
+                            </characteristic>
+                        </characteristic>
+                        <characteristic type="CertificateStore">
+                            <characteristic type="My">
+                            <characteristic type="User">
+                                <characteristic type="ProvisionedCert">
+                                <parm name="EncodedCertificate" value="{b64_cert}" />
+                                </characteristic>
+                                <characteristic type="PrivateKeyContainer"/>
+                            </characteristic>
+                            </characteristic>
+                        </characteristic>
+                        <characteristic type="APPLICATION">
+                            <parm name="APPID" value="w7"/>
+                            <parm name="PROVIDER-ID" value="TestMDMServer"/>
+                            <parm name="NAME" value="YourMDMServer"/>
+                            <parm name="ADDR" value="https://windowsmdm.sujanix.com/EnrollmentServer/Enrollment.svc"/>
+                            <!-- additional configuration parameters go here -->
+                        </characteristic>
+                        </wap-provisioningdoc>"""
+    return provisioning_xml
 
-        provisioning_xml = f"""<wap-provisioningdoc version="1.1">
-        <characteristic type="CertificateStore">
-            <characteristic type="My">
-            <characteristic type="User">
-                <characteristic type="ProvisionedCert">
-                <parm name="EncodedCertificate" value="{cert_der_b64}" />
+
+
+@app.route('/ManagementServer/MDM.svc', methods=['POST'])
+def manage_handler():
+    try:
+        # Read the HTTP request body as a UTF-8 string.
+        body = request.get_data(as_text=True)
+        print("HTTP Request Body:", body)
+        # Retrieve the MessageID.
+        message_id_match = re.search(r'<a:MessageID>(.*?)<\/a:MessageID>', body, re.DOTALL)
+        if message_id_match:
+            message_id = message_id_match.group(1).strip()
+            print("Extracted MessageID:", message_id)
+        else:
+            return Response("MessageID not found", status=400)
+        # Retrieve the BinarySecurityToken (CSR) – note: in production you would fully parse the XML.
+        bst_match = re.search(
+            r'<wsse:BinarySecurityToken ValueType="http:\/\/schemas\.microsoft\.com\/windows\/pki\/2009\/01\/enrollment#PKCS10" EncodingType="http:\/\/docs\.oasis-open\.org\/wss\/2004\/01\/oasis-200401-wss-wssecurity-secext-1\.0\.xsd#base64binary">(.*?)<\/wsse:BinarySecurityToken>',
+            body,
+            re.DOTALL
+        )
+        if bst_match:
+            binary_security_token = bst_match.group(1).strip()
+            print("Extracted BinarySecurityToken:", binary_security_token)
+        else:
+            binary_security_token = None
+        # Retrieve the DeviceID.
+        device_id_match = re.search(
+            r'<ac:ContextItem Name="DeviceID"><ac:Value>(.*?)<\/ac:Value><\/ac:ContextItem>',
+            body,
+            re.DOTALL
+        )
+        if device_id_match:
+            device_id = device_id_match.group(1).strip()
+            print("Extracted DeviceID:", device_id)
+        else:
+            return Response("DeviceID not found", status=400)
+        # Retrieve the EnrollmentType.
+        enrollment_type_match = re.search(
+            r'<ac:ContextItem Name="EnrollmentType"><ac:Value>(.*?)<\/ac:Value><\/ac:ContextItem>',
+            body,
+            re.DOTALL
+        )
+        if enrollment_type_match:
+            enrollment_type = enrollment_type_match.group(1).strip()
+            print("Extracted EnrollmentType:", enrollment_type)
+        else:
+            return Response("EnrollmentType not found", status=400)
+        # Retrieve the SessionID.
+        session_id_match = re.search(r'<SessionID>(.*?)<\/SessionID>', body, re.DOTALL)
+        if session_id_match:
+            session_id = session_id_match.group(1).strip()
+            print("Extracted SessionID:", session_id)
+        else:
+            return Response("SessionID not found", status=400)
+        # Retrieve the MsgID.
+        msg_id_match = re.search(r'<MsgID>(.*?)<\/MsgID>', body, re.DOTALL)
+        if msg_id_match:
+            msg_id = msg_id_match.group(1).strip()
+            print("Extracted MsgID:", msg_id)
+        else:
+            return Response("MsgID not found", status=400)
+        # Decide which response to generate based on the presence of "com.microsoft/MDM/AADUserToken"
+        if "com.microsoft/MDM/AADUserToken" in body:
+            response_body = f"""<?xml version="1.0" encoding="UTF-8"?>
+                                <SyncML xmlns="SYNCML:SYNCML1.2">
+                                <SyncHdr>
+                                <VerDTD>1.2</VerDTD>
+                                <VerProto>DM/1.2</VerProto>
+                                <SessionID>{session_id}</SessionID>
+                                <MsgID>{msg_id}</MsgID>
+                                <Target>
+                                <LocURI>{device_id}</LocURI>
+                                </Target>
+                                <Source>
+                                <LocURI>https://windowsmdm.sujanix.com/ManagementServer/MDM.svc</LocURI>
+                                </Source>
+                                </SyncHdr>
+                                <SyncBody>
+                                <Status>
+                                <CmdID>1</CmdID>
+                                <MsgRef>{msg_id}</MsgRef>
+                                <CmdRef>0</CmdRef>
+                                <Cmd>SyncHdr</Cmd>
+                                <Data>200</Data>
+                                </Status>
+                                <Status>
+                                <CmdID>2</CmdID>
+                                <MsgRef>{msg_id}</MsgRef>
+                                <CmdRef>2</CmdRef>
+                                <Cmd>Alert</Cmd>
+                                <Data>200</Data>
+                                </Status>
+                                <Status>
+                                <CmdID>3</CmdID>
+                                <MsgRef>{msg_id}</MsgRef>
+                                <CmdRef>3</CmdRef>
+                                <Cmd>Alert</Cmd>
+                                <Data>200</Data>
+                                </Status>
+                                <Status>
+                                <CmdID>4</CmdID>
+                                <MsgRef>{msg_id}</MsgRef>
+                                <CmdRef>4</CmdRef>
+                                <Cmd>Alert</Cmd>
+                                <Data>200</Data>
+                                </Status>
+                                <Status>
+                                <CmdID>5</CmdID>
+                                <MsgRef>{msg_id}</MsgRef>
+                                <CmdRef>5</CmdRef>
+                                <Cmd>Replace</Cmd>
+                                <Data>200</Data>
+                                </Status>
+                                <Final />
+                                </SyncBody>
+                                </SyncML>"""
+        else:
+                response_body = f"""<?xml version="1.0" encoding="UTF-8"?>
+                                <SyncML xmlns="SYNCML:SYNCML1.2">
+                                <SyncHdr>VerDTD
+                                <VerDTD>1.2</VerDTD>
+                                <VerProto>DM/1.2</VerProto>
+                                <SessionID>{session_id}</SessionID>
+                                <MsgID>{msg_id}</MsgID>
+                                <Target>
+                                <LocURI>{device_id}</LocURI>
+                                </Target>
+                                <Source>
+                                <LocURI>https://windowsmdm.sujanix.com/ManagementServer/MDM.svc</LocURI>
+                                </Source>
+                                </SyncHdr>
+                                <SyncBody>
+                                <Status>
+                                <CmdID>1</CmdID>
+                                <MsgRef>{msg_id}</MsgRef>
+                                <CmdRef>0</CmdRef>
+                                <Cmd>SyncHdr</Cmd>
+                                <Data>200</Data>
+                                </Status>
+                                <Status>
+                                <CmdID>2</CmdID>
+                                <MsgRef>{msg_id}</MsgRef>
+                                <CmdRef>2</CmdRef>
+                                <Cmd>Alert</Cmd>
+                                <Data>200</Data>
+                                </Status>
+                                <Status>
+                                <CmdID>3</CmdID>
+                                <MsgRef>{msg_id}</MsgRef>
+                                <CmdRef>3</CmdRef>
+                                <Cmd>Alert</Cmd>
+                                <Data>200</Data>
+                                </Status>
+                                <Status>
+                                <CmdID>4</CmdID>
+                                <MsgRef>{msg_id}</MsgRef>
+                                <CmdRef>4</CmdRef>
+                                <Cmd>Replace</Cmd>
+                                <Data>200</Data>
+                                </Status>
+                                <Final />
+                                </SyncBody>
+                </SyncML>"""
+        # Remove newlines and tabs and encode to bytes.
+        response_raw = response_body.replace("\n", "").replace("\t", "").encode("utf-8")
+        resp = Response(response_raw, mimetype="application/vnd.syncml.dm+xml")
+        resp.headers["Content-Length"] = str(len(response_raw))
+        return resp
+    except Exception as e:
+        print("Error in ManageHandler:", e)
+        return Response("Internal Server Error", status=500)
+    
+    
+    
+@app.route('/EnrollmentServer/Enrollment.svc', methods=['POST'])
+def enroll_service():
+    print("NEW____ENROLLMENT_API___________")
+    try:
+        # 1. Read the HTTP request body as a UTF-8 string.
+        body = request.get_data(as_text=True)
+        print("HTTP Request Body:", body)
+        
+        # 2. Extract the MessageID.
+        message_id_match = re.search(r'<a:MessageID>(.*?)<\/a:MessageID>', body, re.DOTALL)
+        if message_id_match:
+            message_id = message_id_match.group(1).strip()
+            print("Extracted MessageID:", message_id)
+        else:
+            return Response("MessageID not found", status=400)
+        
+        # 3. Parse the SOAP XML envelope.
+        envelope = ET.fromstring(body)
+        
+        # 4. Retrieve the <wsse:BinarySecurityToken> element.
+        wsse_ns = "http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd"
+        token_elem = envelope.find(f'.//{{{wsse_ns}}}BinarySecurityToken')
+        if token_elem is None:
+            return Response("BinarySecurityToken not found", status=400)
+        
+        # 5. Validate the required attributes.
+        expected_value_type = "http://schemas.microsoft.com/5.0.0.0/ConfigurationManager/Enrollment/DeviceEnrollmentUserToken"
+        expected_encoding_type = "http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd#base64binary"
+        value_type = token_elem.get("ValueType")
+        encoding_type = token_elem.get("EncodingType")
+        if value_type != expected_value_type or encoding_type != expected_encoding_type:
+            error_msg = f"Invalid BinarySecurityToken attributes: ValueType: {value_type}, EncodingType: {encoding_type}"
+            print(error_msg)
+            return Response(error_msg, status=400)
+        
+        # 6. Extract the BinarySecurityToken content.
+        binary_security_token = token_elem.text.strip()
+        print("Extracted BinarySecurityToken:", binary_security_token)
+        
+        # 7. Extract DeviceID.
+        device_id_match = re.search(
+            r'<ac:ContextItem Name="DeviceID"><ac:Value>(.*?)<\/ac:Value><\/ac:ContextItem>',
+            body, re.DOTALL)
+        if device_id_match:
+            device_id = device_id_match.group(1).strip()
+            print("Extracted DeviceID:", device_id)
+        else:
+            return Response("DeviceID not found", status=400)
+        
+        # 8. Extract EnrollmentType.
+        enrollment_type_match = re.search(
+            r'<ac:ContextItem Name="EnrollmentType"><ac:Value>(.*?)<\/ac:Value><\/ac:ContextItem>',
+            body, re.DOTALL)
+        if enrollment_type_match:
+            enrollment_type = enrollment_type_match.group(1).strip()
+            print("Extracted EnrollmentType:", enrollment_type)
+        else:
+            return Response("EnrollmentType not found", status=400)
+        
+        # 9. Load raw Root CA certificate and private key from PEM files.
+        try:
+            with open("./identities/rootCA.crt", "rb") as cert_file:
+                root_certificate_pem = cert_file.read()
+            with open("./identities/rootCA.key", "rb") as key_file:
+                root_private_key_pem = key_file.read()
+            print("Root CA certificate and private key loaded successfully (PEM)")
+        except Exception as e:
+            print("Error loading certificates:", e)
+            return Response("Internal Server Error", status=500)
+        
+        # 10. Parse the PEM certificates and convert them to DER.
+        try:
+            root_cert_parsed = crypto.load_certificate(crypto.FILETYPE_PEM, root_certificate_pem)
+            root_key_parsed = crypto.load_privatekey(crypto.FILETYPE_PEM, root_private_key_pem)
+            root_certificate_der = crypto.dump_certificate(crypto.FILETYPE_ASN1, root_cert_parsed)
+            root_private_key_der = crypto.dump_privatekey(crypto.FILETYPE_ASN1, root_key_parsed)
+            print("Parsed and converted Root CA certificate and private key to DER successfully")
+        except Exception as e:
+            print("Error parsing/converting certificates:", e)
+            return Response("Internal Server Error", status=500)
+        
+        # 11. Decode the Base64 BinarySecurityToken to get the CSR raw bytes.
+        try:
+            decoded_token = base64.b64decode(binary_security_token)
+            print("Decoded BinarySecurityToken (hex):", decoded_token.hex()[:100])
+        except Exception as e:
+            print("Error decoding BinarySecurityToken:", e)
+            return Response("Invalid BinarySecurityToken format", status=400)
+
+        # Check if a certificate (instead of a CSR) was sent.
+        if decoded_token.strip().startswith(b"-----BEGIN CERTIFICATE-----"):
+            print("Received a certificate instead of a CSR.")
+            return Response("Expected a CSR but received a certificate. Please generate a proper CSR.", status=400)
+        
+        # 12. Parse the CSR.
+        try:
+            # If the token is in PEM format.
+            if decoded_token.strip().startswith(b"-----BEGIN"):
+                if b"CERTIFICATE REQUEST" in decoded_token:
+                    csr = x509.load_pem_x509_csr(decoded_token, default_backend())
+                    print("CSR loaded successfully (PEM)")
+                else:
+                    return Response("Expected a CSR PEM, but got unexpected header", status=400)
+            else:
+                # Assume DER format.
+                csr = x509.load_der_x509_csr(decoded_token, default_backend())
+                print("CSR loaded successfully (DER)")
+        except Exception as e:
+            print("Error parsing CSR:", e)
+            return Response("Invalid CSR", status=400)
+                
+        # 13. Verify the CSR signature.
+        try:
+            csr.public_key().verify(
+                csr.signature,
+                csr.tbs_certrequest_bytes,
+                padding.PKCS1v15(),
+                csr.signature_hash_algorithm
+            )
+            print("CSR signature verified successfully")
+        except Exception as e:
+            print("CSR signature verification failed:", e)
+            return Response("CSR signature verification failed", status=400)
+        
+        # 14. Create a client certificate.
+        not_before = datetime.now(timezone.utc) - timedelta(minutes=random.randint(0, 119))
+        not_after = not_before + timedelta(days=365)
+        certificate_builder = x509.CertificateBuilder()
+        certificate_builder = certificate_builder.subject_name(
+            x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, device_id)])
+        )
+        # Use the Root CA subject as the issuer.
+        issuer_components = root_cert_parsed.get_subject().get_components()
+        issuer_name = x509.Name([x509.NameAttribute(k.decode('utf-8'), v.decode('utf-8')) for k, v in issuer_components])
+        certificate_builder = certificate_builder.issuer_name(issuer_name)
+        certificate_builder = certificate_builder.public_key(csr.public_key())
+        certificate_builder = certificate_builder.serial_number(random.randint(1000, 1000000))
+        certificate_builder = certificate_builder.not_valid_before(not_before)
+        certificate_builder = certificate_builder.not_valid_after(not_after)
+        certificate_builder = certificate_builder.add_extension(
+            x509.KeyUsage(
+                digital_signature=True,
+                content_commitment=False,
+                key_encipherment=False,
+                data_encipherment=False,
+                key_agreement=False,
+                key_cert_sign=False,
+                crl_sign=False,
+                encipher_only=False,
+                decipher_only=False
+            ),
+            critical=True
+        )
+        certificate_builder = certificate_builder.add_extension(
+            x509.ExtendedKeyUsage([ExtendedKeyUsageOID.CLIENT_AUTH]),
+            critical=True
+        )
+        
+        # Convert the OpenSSL key to a cryptography key.
+        root_key_pem = crypto.dump_privatekey(crypto.FILETYPE_PEM, root_key_parsed)
+        root_key_crypto = serialization.load_pem_private_key(root_key_pem, password=None, backend=default_backend())
+        
+        client_certificate = certificate_builder.sign(
+            private_key=root_key_crypto,
+            algorithm=hashes.SHA256(),
+            backend=default_backend()
+        )
+        
+        client_cert_der = client_certificate.public_bytes(encoding=x509.Encoding.DER)
+        print("Client certificate signed successfully")
+        
+        # 15. Compute SHA-1 fingerprints.
+        client_cert_fingerprint = hashlib.sha1(client_cert_der).hexdigest().upper()
+        print("Client Certificate Fingerprint:", client_cert_fingerprint)
+        identity_cert_fingerprint = hashlib.sha1(root_certificate_der).hexdigest().upper()
+        print("Identity Certificate Fingerprint:", identity_cert_fingerprint)
+        
+        # 16. Determine CertStore.
+        cert_store = "System" if enrollment_type == "Device" else "User"
+        print("CertStore:", cert_store)
+        
+        # 17. Generate WAP provisioning profile XML.
+        wap_provision_profile = f"""<?xml version="1.0" encoding="UTF-8"?>
+        <wap-provisioningdoc version="1.1">
+            <characteristic type="CertificateStore">
+                <characteristic type="Root">
+                    <characteristic type="System">
+                        <characteristic type="{identity_cert_fingerprint}">
+                            <parm name="EncodedCertificate" value="{base64.b64encode(root_certificate_der).decode('utf-8')}" />
+                        </characteristic>
+                    </characteristic>
+                </characteristic>
+                <characteristic type="My">
+                    <characteristic type="{cert_store}">
+                        <characteristic type="{client_cert_fingerprint}">
+                            <parm name="EncodedCertificate" value="{base64.b64encode(client_cert_der).decode('utf-8')}" />
+                        </characteristic>
+                        <characteristic type="PrivateKeyContainer" />
+                    </characteristic>
                 </characteristic>
             </characteristic>
+            <characteristic type="APPLICATION">
+                <parm name="APPID" value="w7" />
+                <parm name="PROVIDER-ID" value="DEMO MDM" />
+                <parm name="NAME" value="Windows MDM Demo Server" />
+                <parm name="ADDR" value="https://windowsmdm.sujanix.com/ManagementServer/MDM.svc" />
+                <parm name="ROLE" value="4294967295" />
+                <parm name="BACKCOMPATRETRYDISABLED" />
+                <parm name="DEFAULTENCODING" value="application/vnd.syncml.dm+xml" />
+                <characteristic type="APPAUTH">
+                    <parm name="AAUTHLEVEL" value="CLIENT" />
+                    <parm name="AAUTHTYPE" value="DIGEST" />
+                    <parm name="AAUTHSECRET" value="dummy" />
+                    <parm name="AAUTHDATA" value="nonce" />
+                </characteristic>
+                <characteristic type="APPAUTH">
+                    <parm name="AAUTHLEVEL" value="APPSRV" />
+                    <parm name="AAUTHTYPE" value="DIGEST" />
+                    <parm name="AAUTHNAME" value="dummy" />
+                    <parm name="AAUTHSECRET" value="dummy" />
+                    <parm name="AAUTHDATA" value="nonce" />
+                </characteristic>
             </characteristic>
-        </characteristic>
-        <characteristic type="DMClient">
-            <characteristic type="Provider">
-            <parm name="DMServer" value="https://windowsmdm.sujanix.com/EnrollmentServer/Enrollment.svc" />
+            <characteristic type="DMClient">
+                <characteristic type="Provider">
+                    <characteristic type="DEMO MDM">
+                        <characteristic type="Poll">
+                            <parm name="NumberOfFirstRetries" value="8" datatype="integer" />
+                        </characteristic>
+                    </characteristic>
+                </characteristic>
             </characteristic>
-        </characteristic>
         </wap-provisioningdoc>"""
-        provisioning_xml_encoded = base64.b64encode(provisioning_xml.encode('utf-8')).decode('utf-8')
-
-        # Extract MessageID from request for correlation.
-        message_id_match = re.search(r'<a:MessageID>(.*?)<\/a:MessageID>', request_xml)
-        message_id = message_id_match.group(1) if message_id_match else str(uuid.uuid4())
-
-        # Create Timestamp values for the Security header.
-        created_time = datetime.now(timezone.utc).isoformat()
-        expires_time = (datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat()
-
-        # Build the SOAP response (RSTR) with Security header.
-        response_payload = f"""<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
-        xmlns:a="http://www.w3.org/2005/08/addressing"
-        xmlns:o="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd"
-        xmlns:u="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-utility-1.0.xsd">
-        <s:Header>
-            <a:Action s:mustUnderstand="1">http://schemas.microsoft.com/windows/pki/2009/01/enrollment/RSTRC/wstep</a:Action>
-            <a:RelatesTo>{message_id}</a:RelatesTo>
-            <o:Security s:mustUnderstand="1">
-            <u:Timestamp u:Id="_0">
-                <u:Created>{created_time}</u:Created>
-                <u:Expires>{expires_time}</u:Expires>
-            </u:Timestamp>
-            </o:Security>
-        </s:Header>
-        <s:Body>
-            <RequestSecurityTokenResponseCollection xmlns="http://docs.oasis-open.org/ws-sx/ws-trust/200512">
-            <RequestSecurityTokenResponse>
-                <TokenType>
-                http://schemas.microsoft.com/5.0.0.0/ConfigurationManager/Enrollment/DeviceEnrollmentToken
-                </TokenType>
-                <DispositionMessage xmlns="http://schemas.microsoft.com/windows/pki/2009/01/enrollment"/>
-                <RequestedSecurityToken>
-                <BinarySecurityToken ValueType="http://schemas.microsoft.com/5.0.0.0/ConfigurationManager/Enrollment/DeviceEnrollmentProvisionDoc"
-                    EncodingType="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd#base64binary">
-                    {provisioning_xml_encoded}
-                </BinarySecurityToken>
-                </RequestedSecurityToken>
-                <RequestID xmlns="http://schemas.microsoft.com/windows/pki/2009/01/enrollment">0</RequestID>
-            </RequestSecurityTokenResponse>
-            </RequestSecurityTokenResponseCollection>
-        </s:Body>
+                
+        wap_provision_profile_raw = wap_provision_profile.replace("\n", "").replace("\t", "").encode("utf-8")
+                
+     # 18. Create SOAP response payload.
+        response_xml = f"""<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"
+            xmlns:a="http://www.w3.org/2005/08/addressing"
+            xmlns:u="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-utility-1.0.xsd">
+            <s:Header>
+                <a:Action s:mustUnderstand="1">http://schemas.microsoft.com/windows/pki/2009/01/enrollment/RSTRC/wstep</a:Action>
+                <a:RelatesTo>{message_id}</a:RelatesTo>
+                <o:Security xmlns:o="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd" s:mustUnderstand="1">
+                    <u:Timestamp u:Id="_0">
+                        <u:Created>2018-11-30T00:32:59.420Z</u:Created>
+                        <u:Expires>2018-12-30T00:37:59.420Z</u:Expires>
+                    </u:Timestamp>
+                </o:Security>
+            </s:Header>
+            <s:Body>
+                <RequestSecurityTokenResponseCollection xmlns="http://docs.oasis-open.org/ws-sx/ws-trust/200512">
+                    <RequestSecurityTokenResponse>
+                        <TokenType>http://schemas.microsoft.com/5.0.0.0/ConfigurationManager/Enrollment/DeviceEnrollmentToken</TokenType>
+                        <DispositionMessage xmlns="http://schemas.microsoft.com/windows/pki/2009/01/enrollment"></DispositionMessage>
+                        <RequestedSecurityToken>
+                            <BinarySecurityToken xmlns="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd" 
+                                ValueType="http://schemas.microsoft.com/5.0.0.0/ConfigurationManager/Enrollment/DeviceEnrollmentProvisionDoc" 
+                                EncodingType="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd#base64binary">
+                                {base64.b64encode(wap_provision_profile_raw).decode('utf-8')}
+                            </BinarySecurityToken>
+                        </RequestedSecurityToken>
+                        <RequestID xmlns="http://schemas.microsoft.com/windows/pki/2009/01/enrollment">0</RequestID>
+                    </RequestSecurityTokenResponse>
+                </RequestSecurityTokenResponseCollection>
+            </s:Body>
         </s:Envelope>"""
-        response = Response(response_payload, status=200, content_type='application/soap+xml')
-        response.headers['Content-Length'] = str(len(response_payload))
-        print("Enrollment Service Response Payload:", response_payload)
-        return response
-    except Exception as e:
-        print("Error in Enrollment Service:", str(e))
-        return Response(f"Internal Server Error: {str(e)}", status=500)
+        print(response_xml)
+        
+        resp = Response(response_xml, mimetype="application/soap+xml; charset=utf-8")
+        resp.headers["Content-Length"] = str(len(response_xml))
+        return resp
 
+    except Exception as e:
+        print("Error processing enrollment request:", e)
+        return Response("Internal Server Error", status=500)
+     
+
+     
+     
     
 @app.route('/devices', methods=['GET'])
 def devices():
@@ -400,534 +819,4 @@ def all_devices():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
-
-
-
-# main.py
-
-# from flask import Flask, request, jsonify, render_template, Response, redirect, render_template_string, make_response
-# from lxml import etree
-# from jose import jwt, JOSEError
-# from xml.etree.ElementTree import Element, SubElement, tostring, fromstring
-# import uuid
-# import base64
-# import requests
-# import re
-# import hashlib
-# import json
-# import OpenSSL.crypto as crypto
-# from config import Config
-# from utils.graph_api import enroll_device, list_devices, list_all_devcies
-
-# app = Flask(__name__)
-
-# # --------------------------
-# # Home and Utility Endpoints
-# # --------------------------
-# @app.route("/")
-# def home():
-#     return jsonify({
-#         "message": "Welcome to the Windows MDM Server",
-#         "endpoints": {
-#             "discovery": "https://windowsmdm.sujanix.com/EnrollmentServer/Discovery.svc",
-#             "terms_of_use": "https://windowsmdm.sujanix.com/EnrollmentServer/TermsofUse",
-#             "compliance": "https://windowsmdm.sujanix.com/EnrollmentServer/Compliance.svc",
-#             "enrollment": "https://windowsmdm.sujanix.com/EnrollmentServer/Enrollment.svc",
-#             "authentication": "https://windowsmdm.sujanix.com/AuthenticationService.svc"
-#         }
-#     })
-
-# @app.route('/EnrollmentServer/TermsofUse', methods=['GET'])
-# def terms_of_use():
-#     return render_template('terms_of_use.html')
-
-# @app.route('/EnrollmentServer/Compliance.svc', methods=['GET'])
-# def compliance():
-#     device_id = request.args.get("device_id")
-#     if not device_id:
-#         return jsonify({"error": "Device ID is required"}), 400
-
-#     # Example compliance status (mocked)
-#     compliance_status = {
-#         "device_id": device_id,
-#         "compliant": True,
-#         "details": "Device is compliant with all MDM policies."
-#     }
-#     return jsonify(compliance_status)
-
-# @app.route('/EnrollmentServer/ToS', methods=['GET'])
-# def terms_of_service():
-#     redirect_uri = request.args.get('redirect_uri', '')
-#     client_request_id = request.args.get('client-request-id', '')
-#     if not redirect_uri:
-#         return "Error: redirect_uri is required", 400
-#     html_content = f"""
-#     <html>
-#     <head>
-#       <title>MDM Terms of Use</title>
-#     </head>
-#     <body>
-#       <h3>MDM Terms of Use</h3>
-#       <p>Please accept the Terms of Use to proceed with enrollment.</p>
-#       <button onclick="window.location.href='{redirect_uri}?IsAccepted=true&OpaqueBlob=someValue&client-request-id={client_request_id}'">Accept</button>
-#       <button onclick="window.location.href='{redirect_uri}?IsAccepted=false&client-request-id={client_request_id}'">Decline</button>
-#     </body>
-#     </html>
-#     """
-#     response = make_response(html_content)
-#     response.headers["Content-Type"] = "text/html; charset=UTF-8"
-#     return response
-
-# # --------------------------
-# # Discovery Service Endpoint
-# # --------------------------
-# @app.route('/EnrollmentServer/Discovery.svc', methods=['GET', 'POST'])
-# def discovery_service():
-#     print(f"Discovery API Hit: {request.method} from {request.remote_addr}")
-#     if request.method == 'GET':
-#         # For GET requests, simply return the enrollment service URL.
-#         return Response("https://windowsmdm.sujanix.com/EnrollmentServer/Enrollment.svc", status=200)
-
-#     try:
-#         # Decode and log incoming XML request.
-#         body = request.data.decode('utf-8')
-#         print("Discovery Request Data:", body)
-        
-#         # Extract required fields using regex.
-#         message_id_match = re.search(r'<a:MessageID>(.*?)<\/a:MessageID>', body)
-#         if not message_id_match:
-#             return Response("Invalid Request: MessageID not found", status=400)
-#         message_id = message_id_match.group(1)
-
-#         email_match = re.search(r'<EmailAddress>(.*?)<\/EmailAddress>', body)
-#         email_address = email_match.group(1) if email_match else "Not Provided"
-
-#         os_edition_match = re.search(r'<OSEdition>(.*?)<\/OSEdition>', body)
-#         os_edition = os_edition_match.group(1) if os_edition_match else "Not Provided"
-
-#         device_type_match = re.search(r'<DeviceType>(.*?)<\/DeviceType>', body)
-#         device_type = device_type_match.group(1) if device_type_match else "Not Provided"
-
-#         app_version_match = re.search(r'<ApplicationVersion>(.*?)<\/ApplicationVersion>', body)
-#         application_version = app_version_match.group(1) if app_version_match else "Not Provided"
-
-#         print(f"MessageID: {message_id}")
-#         print(f"Email Address: {email_address}")
-#         print(f"OS Edition: {os_edition}")
-#         print(f"Device Type: {device_type}")
-#         print(f"Application Version: {application_version}")
-
-#         # For federated authentication, set AuthPolicy and build the response.
-#         auth_policy = "Federated"
-#         domain = "windowsmdm.sujanix.com"
-#         activity_id = str(uuid.uuid4())
-#         print("Generated Activity ID:", activity_id)
-
-#         response_payload = f"""<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"
-#             xmlns:a="http://www.w3.org/2005/08/addressing">
-#         <s:Header>
-#             <a:Action s:mustUnderstand="1">
-#             http://schemas.microsoft.com/windows/management/2012/01/enrollment/IDiscoveryService/DiscoverResponse
-#             </a:Action>
-#             <ActivityId>{activity_id}</ActivityId>
-#             <a:RelatesTo>{message_id}</a:RelatesTo>
-#         </s:Header>
-#         <s:Body xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-#                 xmlns:xsd="http://www.w3.org/2001/XMLSchema">
-#             <DiscoverResponse xmlns="http://schemas.microsoft.com/windows/management/2012/01/enrollment">
-#             <DiscoverResult>
-#                 <AuthPolicy>{auth_policy}</AuthPolicy>
-#                 <EnrollmentVersion>3.0</EnrollmentVersion>
-#                 <AuthenticationServiceUrl>https://{domain}/AuthenticationService.svc</AuthenticationServiceUrl>
-#                 <EnrollmentPolicyServiceUrl>https://{domain}/ENROLLMENTSERVER/DEVICEENROLLMENTWEBSERVICE.SVC</EnrollmentPolicyServiceUrl>
-#                 <EnrollmentServiceUrl>https://{domain}/EnrollmentServer/Enrollment.svc</EnrollmentServiceUrl>
-#             </DiscoverResult>
-#             </DiscoverResponse>
-#         </s:Body>
-#         </s:Envelope>"""
-#         print("Discovery Response Payload:", response_payload)
-#         return Response(response_payload, content_type='application/soap+xml')
-#     except Exception as e:
-#         return Response(f"Internal Server Error: {str(e)}", status=500)
-
-# @app.route('/AuthenticationService.svc', methods=['GET', 'POST'])
-# def authentication_service():
-#     if request.method == 'GET':
-#         # Redirect the device to Microsoft Entra ID (Azure AD) for federated authentication.
-#         tenant_id = Config.TENANT_ID
-#         client_id = Config.CLIENT_ID
-#         redirect_uri = "https://windowsmdm.sujanix.com/auth/callback"
-#         authority = f"https://login.microsoftonline.com/{tenant_id}"
-#         auth_url = f"{authority}/oauth2/v2.0/authorize"
-
-#         auth_params = {
-#             "client_id": client_id,
-#             "response_type": "code",
-#             "redirect_uri": redirect_uri,
-#             "response_mode": "query",
-#             "scope": "openid profile email",
-#             "state": "state_value",  
-#         }
-#         query_string = "&".join(f"{key}={value}" for key, value in auth_params.items())
-#         print("Authentication Query String:", query_string)
-#         return redirect(f"{auth_url}?{query_string}")
-#     else:
-#         # For POST requests, you might add additional handling if needed.
-#         return Response("POST not implemented on AuthenticationService", status=405)
-
-
-# # --------------------------
-# # Authentication (WAB) Endpoints
-# # --------------------------
-# @app.route('/AuthenticationService.svc', methods=['GET', 'POST'])
-# def authentication_service():
-#     if request.method == 'GET':
-#         tenant_id = Config.TENANT_ID
-#         client_id = Config.CLIENT_ID
-#         # Generate a unique state parameter (store in session for production)
-#         state = str(uuid.uuid4())
-#         redirect_uri = "https://windowsmdm.sujanix.com/auth/callback"
-#         authority = f"https://login.microsoftonline.com/{tenant_id}"
-#         auth_url = f"{authority}/oauth2/v2.0/authorize"
-#         auth_params = {
-#             "client_id": client_id,
-#             "response_type": "code",
-#             "redirect_uri": redirect_uri,
-#             "response_mode": "query",
-#             "scope": "openid profile email",
-#             "state": state,
-#         }
-#         query_string = "&".join(f"{key}={requests.utils.quote(value)}" for key, value in auth_params.items())
-#         print("Auth Query String:", query_string)
-#         return redirect(f"{auth_url}?{query_string}")
-#     else:
-#         return Response("POST not supported on this endpoint", status=405)
-
-# @app.route('/auth/callback', methods=['GET'])
-# def auth_callback():
-#     print("Callback received with args:", request.args)
-#     tenant_id = Config.TENANT_ID
-#     client_id = Config.CLIENT_ID
-#     client_secret = Config.CLIENT_SECRET
-#     redirect_uri = "https://windowsmdm.sujanix.com/auth/callback"
-#     token_endpoint = f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
-#     code = request.args.get('code')
-#     if not code:
-#         return "Authorization code missing", 400
-#     token_payload = {
-#         "client_id": client_id,
-#         "client_secret": client_secret,
-#         "code": code,
-#         "grant_type": "authorization_code",
-#         "redirect_uri": redirect_uri,
-#     }
-#     token_response = requests.post(token_endpoint, data=token_payload)
-#     if token_response.status_code == 200:
-#         token_data = token_response.json()
-#         access_token = token_data.get("access_token")
-#         print("Access Token:", access_token)
-#         # Render the WAB End Page that auto-submits the token back to the enrollment client.
-#         wab_end_page = render_template_string("""
-#             <!DOCTYPE html>
-#             <html>
-#             <head>
-#               <title>Authentication Complete</title>
-#               <script>
-#                 function formSubmit() {
-#                   document.forms[0].submit();
-#                 }
-#                 window.onload = formSubmit;
-#               </script>
-#             </head>
-#             <body>
-#               <form method="post" action="ms-app://windows.immersivecontrolpanel">
-#                 <input type="hidden" name="wresult" value="{{ access_token }}" />
-#                 <input type="submit" value="Continue" />
-#               </form>
-#             </body>
-#             </html>
-#         """, access_token=access_token)
-#         return wab_end_page
-#     return f"Error fetching token: {token_response.text}", 500
-
-# # --------------------------
-# # Enrollment Policy Service
-# # --------------------------
-# @app.route('/ENROLLMENTSERVER/DEVICEENROLLMENTWEBSERVICE.SVC', methods=['POST'])
-# def enrollment_policy_service():
-#     body_raw = request.data.decode('utf-8')
-#     print("Enrollment Policy Request Body:", body_raw)
-#     message_id_match = re.search(r'<a:MessageID>(.*?)<\/a:MessageID>', body_raw)
-#     if message_id_match:
-#         message_id = message_id_match.group(1)
-#     else:
-#         return Response("Invalid request: MessageID not found", status=400)
-
-#     # Build SOAP envelope response using SOAP 1.2
-#     soap_ns = "http://www.w3.org/2003/05/soap-envelope"
-#     addressing_ns = "http://www.w3.org/2005/08/addressing"
-#     policy_ns = "http://schemas.microsoft.com/windows/pki/2009/01/enrollmentpolicy"
-#     envelope = Element("{%s}Envelope" % soap_ns)
-#     header = SubElement(envelope, "{%s}Header" % soap_ns)
-#     action = SubElement(header, "{%s}Action" % addressing_ns, {"s:mustUnderstand": "1"})
-#     action.text = "http://schemas.microsoft.com/windows/pki/2009/01/enrollmentpolicy/IPolicy/GetPoliciesResponse"
-#     relates = SubElement(header, "{%s}RelatesTo" % addressing_ns)
-#     relates.text = message_id
-#     body_el = SubElement(envelope, "{%s}Body" % soap_ns)
-#     get_policies_response = SubElement(body_el, "GetPoliciesResponse", xmlns=policy_ns)
-#     response_el = SubElement(get_policies_response, "response")
-#     policies_el = SubElement(response_el, "policies")
-#     policy_item = SubElement(policies_el, "policy")
-#     policy_oid_ref = SubElement(policy_item, "policyOIDReference")
-#     policy_oid_ref.text = "0"
-#     cas_el = SubElement(policy_item, "cAs")
-#     cas_el.set("{http://www.w3.org/2001/XMLSchema-instance}nil", "true")
-#     attributes = SubElement(policy_item, "attributes")
-#     common_name = SubElement(attributes, "commonName")
-#     common_name.text = "CEPUnitTest"
-#     policy_schema = SubElement(attributes, "policySchema")
-#     policy_schema.text = "3"
-#     certificate_validity = SubElement(attributes, "certificateValidity")
-#     validity_period = SubElement(certificate_validity, "validityPeriodSeconds")
-#     validity_period.text = "1209600"
-#     renewal_period = SubElement(certificate_validity, "renewalPeriodSeconds")
-#     renewal_period.text = "172800"
-#     permission = SubElement(attributes, "permission")
-#     enroll_el = SubElement(permission, "enroll")
-#     enroll_el.text = "true"
-#     auto_enroll_el = SubElement(permission, "autoEnroll")
-#     auto_enroll_el.text = "false"
-#     private_key_attributes = SubElement(attributes, "privateKeyAttributes")
-#     minimal_key_length = SubElement(private_key_attributes, "minimalKeyLength")
-#     minimal_key_length.text = "2048"
-#     key_spec = SubElement(private_key_attributes, "keySpec")
-#     key_spec.set("{http://www.w3.org/2001/XMLSchema-instance}nil", "true")
-#     key_usage_property = SubElement(private_key_attributes, "keyUsageProperty")
-#     key_usage_property.set("{http://www.w3.org/2001/XMLSchema-instance}nil", "true")
-#     permissions_el = SubElement(private_key_attributes, "permissions")
-#     permissions_el.set("{http://www.w3.org/2001/XMLSchema-instance}nil", "true")
-#     algorithm_oid_ref = SubElement(private_key_attributes, "algorithmOIDReference")
-#     algorithm_oid_ref.set("{http://www.w3.org/2001/XMLSchema-instance}nil", "true")
-#     crypto_providers = SubElement(private_key_attributes, "cryptoProviders")
-#     crypto_providers.set("{http://www.w3.org/2001/XMLSchema-instance}nil", "true")
-#     revision = SubElement(attributes, "revision")
-#     major_revision = SubElement(revision, "majorRevision")
-#     major_revision.text = "101"
-#     minor_revision = SubElement(revision, "minorRevision")
-#     minor_revision.text = "0"
-#     superseded_policies = SubElement(attributes, "supersededPolicies")
-#     superseded_policies.set("{http://www.w3.org/2001/XMLSchema-instance}nil", "true")
-#     private_key_flags = SubElement(attributes, "privateKeyFlags")
-#     private_key_flags.set("{http://www.w3.org/2001/XMLSchema-instance}nil", "true")
-#     subject_name_flags = SubElement(attributes, "subjectNameFlags")
-#     subject_name_flags.set("{http://www.w3.org/2001/XMLSchema-instance}nil", "true")
-#     enrollment_flags = SubElement(attributes, "enrollmentFlags")
-#     enrollment_flags.set("{http://www.w3.org/2001/XMLSchema-instance}nil", "true")
-#     general_flags = SubElement(attributes, "generalFlags")
-#     general_flags.set("{http://www.w3.org/2001/XMLSchema-instance}nil", "true")
-#     hash_algo_oid_ref = SubElement(attributes, "hashAlgorithmOIDReference")
-#     hash_algo_oid_ref.text = "0"
-#     ra_requirements = SubElement(attributes, "rARequirements")
-#     ra_requirements.set("{http://www.w3.org/2001/XMLSchema-instance}nil", "true")
-#     key_archival_attributes = SubElement(attributes, "keyArchivalAttributes")
-#     key_archival_attributes.set("{http://www.w3.org/2001/XMLSchema-instance}nil", "true")
-#     extensions = SubElement(attributes, "extensions")
-#     extensions.set("{http://www.w3.org/2001/XMLSchema-instance}nil", "true")
-#     cAs_response = SubElement(get_policies_response, "cAs")
-#     cAs_response.set("{http://www.w3.org/2001/XMLSchema-instance}nil", "true")
-#     oIDs = SubElement(get_policies_response, "oIDs")
-#     oID = SubElement(oIDs, "oID")
-#     value_el = SubElement(oID, "value")
-#     value_el.text = "1.3.14.3.2.29"
-#     group_el = SubElement(oID, "group")
-#     group_el.text = "1"
-#     oIDReferenceID = SubElement(oID, "oIDReferenceID")
-#     oIDReferenceID.text = "0"
-#     default_name = SubElement(oID, "defaultName")
-#     default_name.text = "szOID_OIWSEC_sha1RSASign"
-
-#     response_payload = tostring(envelope, encoding="utf-8", method="xml")
-#     resp = Response(response_payload, status=200)
-#     resp.headers['Content-Type'] = "application/soap+xml; charset=utf-8"
-#     resp.headers['Content-Length'] = str(len(response_payload))
-#     return resp
-
-# # --------------------------
-# # Enrollment Service Endpoint
-# # --------------------------
-# @app.route('/EnrollmentServer/Enrollment.svc', methods=['POST'])
-# def enroll_service():
-#     print("Enrollment Service endpoint hit")
-#     try:
-#         envelope = ET.fromstring(request.data)
-#         # Look for the BinarySecurityToken element using its namespace
-#         ns = {"wsse": "http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd"}
-#         token_elem = envelope.find('.//wsse:BinarySecurityToken', ns)
-#         if token_elem is None:
-#             return "BinarySecurityToken not found", 400
-#         binary_security_token = token_elem.text.strip()
-#         print("BinarySecurityToken:", binary_security_token)
-#         try:
-#             decoded_token = base64.b64decode(binary_security_token)
-#             print("Decoded Token:", decoded_token)
-#         except Exception as e:
-#             print("Error decoding token:", e)
-#             return "Invalid token format", 400
-#         # Attempt to decode as JWT (if applicable)
-#         try:
-#             jwt_decoded = jwt.decode(decoded_token, options={"verify_signature": False})
-#             print("JWT Decoded:", jwt_decoded)
-#         except JOSEError as e:
-#             print("JWT Decode Error:", e)
-#             return "Invalid JWT token", 400
-
-#         username = jwt_decoded.get("username") or jwt_decoded.get("sub")
-#         print(f"Username from JWT: {username}")
-#         # Here you would normally authenticate the client based on the token claims.
-
-#         # For demonstration, sign a client certificate.
-#         message_id = "urn:uuid:" + str(uuid.uuid4())
-#         # Read root certificate and key from files
-#         root_cert_der, root_key_der = read_certificate("identities/enrollment.crt", "identities/enrollment.key")
-#         root_cert = crypto.load_certificate(crypto.FILETYPE_ASN1, root_cert_der)
-#         root_key = crypto.load_privatekey(crypto.FILETYPE_ASN1, root_key_der)
-#         # Assume the token is a Base64-encoded PKCS#10 CSR
-#         csr_raw = base64.b64decode(binary_security_token)
-#         client_cert_der = create_signed_certificate(csr_raw, root_cert, root_key, "B7F49D0DCFD6D143B40F0440231AA2C7")
-#         client_cert_fingerprint = hashlib.sha1(client_cert_der).hexdigest().upper()
-#         root_cert_fingerprint = hashlib.sha1(root_cert_der).hexdigest().upper()
-#         enrollment_type = "Federated"
-#         cert_store = "System" if enrollment_type == "Device" else "User"
-#         wap_provision_profile = f"""<?xml version="1.0" encoding="UTF-8"?>
-#         <wap-provisioningdoc version="1.1">
-#             <characteristic type="CertificateStore">
-#                 <characteristic type="Root">
-#                     <characteristic type="System">
-#                         <characteristic type="{root_cert_fingerprint}">
-#                             <parm name="EncodedCertificate" value="{base64.b64encode(root_cert_der).decode('utf-8')}" />
-#                         </characteristic>
-#                     </characteristic>
-#                 </characteristic>
-#                 <characteristic type="My">
-#                     <characteristic type="{cert_store}">
-#                         <characteristic type="{client_cert_fingerprint}">
-#                             <parm name="EncodedCertificate" value="{base64.b64encode(client_cert_der).decode('utf-8')}" />
-#                         </characteristic>
-#                         <characteristic type="PrivateKeyContainer" />
-#                     </characteristic>
-#                 </characteristic>
-#             </characteristic>
-#             <characteristic type="APPLICATION">
-#                 <parm name="APPID" value="w7" />
-#                 <parm name="PROVIDER-ID" value="DEMO MDM" />
-#                 <parm name="NAME" value="Windows MDM Demo Server" />
-#                 <parm name="ADDR" value="https://example.com/ManagementServer/MDM.svc" />
-#                 <parm name="ServerList" value="https://example.com/ManagementServer/ServerList.svc" />
-#                 <parm name="ROLE" value="4294967295" />
-#                 <parm name="BACKCOMPATRETRYDISABLED" />
-#                 <parm name="DEFAULTENCODING" value="application/vnd.syncml.dm+xml" />
-#                 <characteristic type="APPAUTH">
-#                     <parm name="AAUTHLEVEL" value="CLIENT" />
-#                     <parm name="AAUTHTYPE" value="DIGEST" />
-#                     <parm name="AAUTHSECRET" value="dummy" />
-#                     <parm name="AAUTHDATA" value="nonce" />
-#                 </characteristic>
-#                 <characteristic type="APPAUTH">
-#                     <parm name="AAUTHLEVEL" value="APPSRV" />
-#                     <parm name="AAUTHTYPE" value="DIGEST" />
-#                     <parm name="AAUTHNAME" value="dummy" />
-#                     <parm name="AAUTHSECRET" value="dummy" />
-#                     <parm name="AAUTHDATA" value="nonce" />
-#                 </characteristic>
-#             </characteristic>
-#         </wap-provisioningdoc>"""
-#         wap_provision_profile_encoded = base64.b64encode(wap_provision_profile.encode("utf-8")).decode("utf-8")
-
-#         # Build SOAP envelope for the enrollment response
-#         soap_ns = "http://www.w3.org/2003/05/soap-envelope"
-#         addressing_ns = "http://www.w3.org/2005/08/addressing"
-#         trust_ns = "http://docs.oasis-open.org/ws-sx/ws-trust/200512"
-#         sec_ns = "http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd"
-#         utility_ns = "http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-utility-1.0.xsd"
-#         envelope_response = Element("{%s}Envelope" % soap_ns)
-#         header = SubElement(envelope_response, "{%s}Header" % soap_ns)
-#         action = SubElement(header, "{%s}Action" % addressing_ns, {"s:mustUnderstand": "1"})
-#         action.text = "http://schemas.microsoft.com/windows/pki/2009/01/enrollment/RSTRC/wstep"
-#         relates = SubElement(header, "{%s}RelatesTo" % addressing_ns)
-#         relates.text = message_id
-#         security = SubElement(header, "{%s}Security" % sec_ns, {"s:mustUnderstand": "1"})
-#         timestamp = SubElement(security, "{%s}Timestamp" % utility_ns, {"u:Id": "_0"})
-#         created = SubElement(timestamp, "{%s}Created" % utility_ns)
-#         created.text = "2018-11-30T00:32:59.420Z"
-#         expires = SubElement(timestamp, "{%s}Expires" % utility_ns)
-#         expires.text = "2018-12-30T00:37:59.420Z"
-#         body_el = SubElement(envelope_response, "{%s}Body" % soap_ns)
-#         rstr_collection = SubElement(body_el, "RequestSecurityTokenResponseCollection", xmlns=trust_ns)
-#         rstr = SubElement(rstr_collection, "RequestSecurityTokenResponse")
-#         token_type = SubElement(rstr, "TokenType")
-#         token_type.text = "http://schemas.microsoft.com/5.0.0.0/ConfigurationManager/Enrollment/DeviceEnrollmentToken"
-#         disposition = SubElement(rstr, "DispositionMessage", xmlns="http://schemas.microsoft.com/windows/pki/2009/01/enrollment")
-#         requested_token = SubElement(rstr, "RequestedSecurityToken")
-#         binary_token = SubElement(requested_token, "BinarySecurityToken", 
-#                                   {
-#                                       "ValueType": "http://schemas.microsoft.com/5.0.0.0/ConfigurationManager/Enrollment/DeviceEnrollmentProvisionDoc",
-#                                       "EncodingType": "http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd#base64binary"
-#                                   },
-#                                   xmlns=sec_ns)
-#         binary_token.text = wap_provision_profile_encoded
-#         request_id = SubElement(rstr, "RequestID", xmlns="http://schemas.microsoft.com/windows/pki/2009/01/enrollment")
-#         request_id.text = "0"
-#         response_payload = tostring(envelope_response, encoding="utf-8", method="xml")
-#         print("Enrollment Response:", response_payload)
-#         return Response(response_payload, mimetype="application/soap+xml; charset=utf-8")
-#     except Exception as e:
-#         print("Error processing enrollment request:", e)
-#         return Response(f"Error: {str(e)}", status=500)
-
-# # --------------------------
-# # Helper Functions
-# # --------------------------
-# def read_certificate(cert_path, key_path):
-#     with open(cert_path, "rb") as cert_file:
-#         cert = cert_file.read()
-#     with open(key_path, "rb") as key_file:
-#         key = key_file.read()
-#     return cert, key
-
-# def create_signed_certificate(csr_raw, root_cert, root_key, device_id):
-#     # Parse the CSR (assumed to be in DER format)
-#     csr = crypto.load_certificate_request(crypto.FILETYPE_ASN1, csr_raw)
-#     # Create a new certificate
-#     cert = crypto.X509()
-#     cert.set_serial_number(int(uuid.uuid4().int >> 64))  # Random serial number
-#     cert.gmtime_adj_notBefore(0)
-#     cert.gmtime_adj_notAfter(365 * 24 * 60 * 60)  # 1 year validity
-#     cert.set_issuer(root_cert.get_subject())
-#     cert.set_subject(csr.get_subject())
-#     cert.set_pubkey(csr.get_pubkey())
-#     cert.sign(root_key, "sha256")
-#     return crypto.dump_certificate(crypto.FILETYPE_ASN1, cert)
-
-# # --------------------------
-# # Additional Endpoints
-# # --------------------------
-# @app.route('/devices', methods=['GET'])
-# def devices():
-#     result = list_devices()
-#     return jsonify(result)
-
-# @app.route('/status', methods=['GET'])
-# def status():
-#     return jsonify({"status": "MDM server running"})
-
-# @app.route('/all-devices', methods=['GET'])
-# def all_devices():
-#     result = list_all_devcies()
-#     return jsonify(result)
-
-# # --------------------------
-# # Run the Application
-# # --------------------------
-# if __name__ == "__main__":
-#     app.run(host='0.0.0.0', port=5000)
 
