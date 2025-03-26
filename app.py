@@ -24,6 +24,17 @@ from OpenSSL import crypto
 import json
 
 app = Flask(__name__)
+domain = "windowsmdm.sujanix.com"
+
+oid_map = {
+    "C": NameOID.COUNTRY_NAME,
+    "ST": NameOID.STATE_OR_PROVINCE_NAME,
+    "L": NameOID.LOCALITY_NAME,
+    "O": NameOID.ORGANIZATION_NAME,
+    "OU": NameOID.ORGANIZATIONAL_UNIT_NAME,
+    "CN": NameOID.COMMON_NAME,
+    "EMAILADDRESS": NameOID.EMAIL_ADDRESS,
+}
 
 @app.route("/")
 
@@ -190,88 +201,87 @@ def auth_callback():
 def enrollment_policy_service():
     body_raw = request.data
     body = body_raw.decode('utf-8')
-    print("Enrollment Policy Request Body:", body)
+    print("Enrollment Policy1 Request Body:", body)
     message_id_match = re.search(r'<a:MessageID>(.*?)<\/a:MessageID>', body)
     if message_id_match:
         message_id = message_id_match.group(1)
     else:
         return Response("Invalid request: MessageID not found", status=400)
     print("Enrollment Policy MessageID:", message_id)
-
     response_payload = f"""<s:Envelope
     xmlns:u="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-utility-1.0.xsd"
     xmlns:s="http://www.w3.org/2003/05/soap-envelope"
     xmlns:a="http://www.w3.org/2005/08/addressing">
-  <s:Header>
+    <s:Header>
     <a:Action s:mustUnderstand="1">
-      http://schemas.microsoft.com/windows/pki/2009/01/enrollmentpolicy/IPolicy/GetPoliciesResponse
+    http://schemas.microsoft.com/windows/pki/2009/01/enrollmentpolicy/IPolicy/GetPoliciesResponse
     </a:Action>
     <a:RelatesTo>{message_id}</a:RelatesTo>
-  </s:Header>
-  <s:Body xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-          xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+    </s:Header>
+    <s:Body xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+            xmlns:xsd="http://www.w3.org/2001/XMLSchema">
     <GetPoliciesResponse xmlns="http://schemas.microsoft.com/windows/pki/2009/01/enrollmentpolicy">
-      <response>
-        <policyID />
-        <policyFriendlyName xsi:nil="true" />
-        <nextUpdateHours xsi:nil="true" />
-        <policiesNotChanged xsi:nil="true" />
-        <policies>
-          <policy>
-            <policyOIDReference>0</policyOIDReference>
-            <cAs xsi:nil="true" />
-            <attributes>
-              <commonName>CEPUnitTest</commonName>
-              <policySchema>3</policySchema>
-              <certificateValidity>
-                <validityPeriodSeconds>1209600</validityPeriodSeconds>
-                <renewalPeriodSeconds>172800</renewalPeriodSeconds>
-              </certificateValidity>
-              <permission>
-                <enroll>true</enroll>
-                <autoEnroll>false</autoEnroll>
-              </permission>
-              <privateKeyAttributes>
-                <minimalKeyLength>2048</minimalKeyLength>
-                <keySpec xsi:nil="true" />
-                <keyUsageProperty xsi:nil="true" />
-                <permissions xsi:nil="true" />
-                <algorithmOIDReference xsi:nil="true" />
-                <cryptoProviders xsi:nil="true" />
-              </privateKeyAttributes>
-              <revision>
-                <majorRevision>101</majorRevision>
-                <minorRevision>0</minorRevision>
-              </revision>
-              <supersededPolicies xsi:nil="true" />
-              <privateKeyFlags xsi:nil="true" />
-              <subjectNameFlags xsi:nil="true" />
-              <enrollmentFlags xsi:nil="true" />
-              <generalFlags xsi:nil="true" />
-              <hashAlgorithmOIDReference>0</hashAlgorithmOIDReference>
-              <rARequirements xsi:nil="true" />
-              <keyArchivalAttributes xsi:nil="true" />
-              <extensions xsi:nil="true" />
-            </attributes>
-          </policy>
-        </policies>
-      </response>
-      <cAs xsi:nil="true" />
-      <oIDs>
-        <oID>
-          <value>1.3.14.3.2.29</value>
-          <group>1</group>
-          <oIDReferenceID>0</oIDReferenceID>
-          <defaultName>szOID_OIWSEC_sha1RSASign</defaultName>
-        </oID>
-      </oIDs>
+    <response>
+    <policyID />
+    <policyFriendlyName xsi:nil="true" />
+    <nextUpdateHours xsi:nil="true" />
+    <policiesNotChanged xsi:nil="true" />
+    <policies>
+    <policy>
+    <policyOIDReference>0</policyOIDReference>
+    <cAs xsi:nil="true" />
+    <attributes>
+    <commonName>CEPUnitTest</commonName>
+    <policySchema>3</policySchema>
+    <certificateValidity>
+    <validityPeriodSeconds>1209600</validityPeriodSeconds>
+    <renewalPeriodSeconds>172800</renewalPeriodSeconds>
+    </certificateValidity>
+    <permission>
+    <enroll>true</enroll>
+    <autoEnroll>false</autoEnroll>
+    </permission>
+    <privateKeyAttributes>
+    <minimalKeyLength>2048</minimalKeyLength>
+    <keySpec xsi:nil="true" />
+    <keyUsageProperty xsi:nil="true" />
+    <permissions xsi:nil="true" />
+    <algorithmOIDReference xsi:nil="true" />
+    <cryptoProviders xsi:nil="true" />
+    </privateKeyAttributes>
+    <revision>
+    <majorRevision>101</majorRevision>
+    <minorRevision>0</minorRevision>
+    </revision>
+    <supersededPolicies xsi:nil="true" />
+    <privateKeyFlags xsi:nil="true" />
+    <subjectNameFlags xsi:nil="true" />
+    <enrollmentFlags xsi:nil="true" />
+    <generalFlags xsi:nil="true" />
+    <hashAlgorithmOIDReference>0</hashAlgorithmOIDReference>
+    <rARequirements xsi:nil="true" />
+    <keyArchivalAttributes xsi:nil="true" />
+    <extensions xsi:nil="true" />
+    </attributes>
+    </policy>
+    </policies>
+    </response>
+    <cAs xsi:nil="true" />
+    <oIDs>
+    <oID>
+    <value>1.3.14.3.2.29</value>
+    <group>1</group>
+    <oIDReferenceID>0</oIDReferenceID>
+    <defaultName>szOID_OIWSEC_sha1RSASign</defaultName>
+    </oID>
+    </oIDs>
     </GetPoliciesResponse>
-  </s:Body>
-</s:Envelope>"""
+    </s:Body>
+    </s:Envelope>"""
     response = Response(response_payload, status=200)
     response.headers['Content-Type'] = 'application/soap+xml; charset=utf-8'
     response.headers['Content-Length'] = str(len(response_payload))
-    print("Enrollment Policy Response:", response)
+    print("Enrollment Policy1 Response:", response)
     return response
 
 
@@ -520,6 +530,283 @@ def manage_handler():
     
     
     
+# @app.route('/EnrollmentServer/Enrollment.svc', methods=['POST'])
+# def enroll_service():
+#     print("NEW____ENROLLMENT_API___________")
+#     try:
+#         # 1. Read the HTTP request body as a UTF-8 string.
+#         body = request.get_data(as_text=True)
+#         print("HTTP Request Body:", body)
+        
+#         # 2. Extract the MessageID.
+#         message_id_match = re.search(r'<a:MessageID>(.*?)<\/a:MessageID>', body, re.DOTALL)
+#         if message_id_match:
+#             message_id = message_id_match.group(1).strip()
+#             print("Extracted MessageID:", message_id)
+#         else:
+#             return Response("MessageID not found", status=400)
+        
+#         # 3. Parse the SOAP XML envelope.
+#         envelope = ET.fromstring(body)
+        
+#         # 4. Retrieve the <wsse:BinarySecurityToken> element.
+#         wsse_ns = "http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd"
+#         token_elem = envelope.find(f'.//{{{wsse_ns}}}BinarySecurityToken')
+#         if token_elem is None:
+#             return Response("BinarySecurityToken not found", status=400)
+        
+#         # 5. Validate the required attributes.
+#         expected_value_type = "http://schemas.microsoft.com/5.0.0.0/ConfigurationManager/Enrollment/DeviceEnrollmentUserToken"
+#         expected_encoding_type = "http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd#base64binary"
+#         value_type = token_elem.get("ValueType")
+#         encoding_type = token_elem.get("EncodingType")
+#         if value_type != expected_value_type or encoding_type != expected_encoding_type:
+#             error_msg = f"Invalid BinarySecurityToken attributes: ValueType: {value_type}, EncodingType: {encoding_type}"
+#             print(error_msg)
+#             return Response(error_msg, status=400)
+        
+#         # 6. Extract the BinarySecurityToken content.
+#         binary_security_token = token_elem.text.strip()
+#         print("Extracted BinarySecurityToken:", binary_security_token)
+        
+#         # 7. Extract DeviceID.
+#         device_id_match = re.search(
+#             r'<ac:ContextItem Name="DeviceID"><ac:Value>(.*?)<\/ac:Value><\/ac:ContextItem>',
+#             body, re.DOTALL)
+#         if device_id_match:
+#             device_id = device_id_match.group(1).strip()
+#             print("Extracted DeviceID:", device_id)
+#         else:
+#             return Response("DeviceID not found", status=400)
+        
+#         # 8. Extract EnrollmentType.
+#         enrollment_type_match = re.search(
+#             r'<ac:ContextItem Name="EnrollmentType"><ac:Value>(.*?)<\/ac:Value><\/ac:ContextItem>',
+#             body, re.DOTALL)
+#         if enrollment_type_match:
+#             enrollment_type = enrollment_type_match.group(1).strip()
+#             print("Extracted EnrollmentType:", enrollment_type)
+#         else:
+#             return Response("EnrollmentType not found", status=400)
+        
+#         # 9. Load raw Root CA certificate and private key from PEM files.
+#         try:
+#             with open("./identities/rootCA.crt", "rb") as cert_file:
+#                 root_certificate_pem = cert_file.read()
+#             with open("./identities/rootCA.key", "rb") as key_file:
+#                 root_private_key_pem = key_file.read()
+#             print("Root CA certificate and private key loaded successfully (PEM)")
+#         except Exception as e:
+#             print("Error loading certificates:", e)
+#             return Response("Internal Server Error", status=500)
+        
+#         # 10. Parse the PEM certificates and convert them to DER.
+#         try:
+#             root_cert_parsed = crypto.load_certificate(crypto.FILETYPE_PEM, root_certificate_pem)
+#             root_key_parsed = crypto.load_privatekey(crypto.FILETYPE_PEM, root_private_key_pem)
+#             root_certificate_der = crypto.dump_certificate(crypto.FILETYPE_ASN1, root_cert_parsed)
+#             root_private_key_der = crypto.dump_privatekey(crypto.FILETYPE_ASN1, root_key_parsed)
+#             print("Parsed and converted Root CA certificate and private key to DER successfully")
+#         except Exception as e:
+#             print("Error parsing/converting certificates:", e)
+#             return Response("Internal Server Error", status=500)
+        
+#         # 11. Decode the Base64 BinarySecurityToken to get the CSR raw bytes.
+#         try:
+#             decoded_token = base64.b64decode(binary_security_token)
+#             print("Decoded BinarySecurityToken (hex):", decoded_token.hex()[:100])
+#         except Exception as e:
+#             print("Error decoding BinarySecurityToken:", e)
+#             return Response("Invalid BinarySecurityToken format", status=400)
+
+#         # Check if a certificate (instead of a CSR) was sent.
+#         if decoded_token.strip().startswith(b"-----BEGIN CERTIFICATE-----"):
+#             print("Received a certificate instead of a CSR.")
+#             return Response("Expected a CSR but received a certificate. Please generate a proper CSR.", status=400)
+        
+#         # 12. Parse the CSR.
+#         try:
+#             # If the token is in PEM format.
+#             if decoded_token.strip().startswith(b"-----BEGIN"):
+#                 if b"CERTIFICATE REQUEST" in decoded_token:
+#                     csr = x509.load_pem_x509_csr(decoded_token, default_backend())
+#                     print("CSR loaded successfully (PEM)")
+#                 else:
+#                     return Response("Expected a CSR PEM, but got unexpected header", status=400)
+#             else:
+#                 # Assume DER format.
+#                 csr = x509.load_der_x509_csr(decoded_token, default_backend())
+#                 print("CSR loaded successfully (DER)")
+#         except Exception as e:
+#             print("Error parsing CSR:", e)
+#             return Response("Invalid CSR", status=400)
+                
+#         # 13. Verify the CSR signature.
+#         try:
+#             csr.public_key().verify(
+#                 csr.signature,
+#                 csr.tbs_certrequest_bytes,
+#                 padding.PKCS1v15(),
+#                 csr.signature_hash_algorithm
+#             )
+#             print("CSR signature verified successfully")
+#         except Exception as e:
+#             print("CSR signature verification failed:", e)
+#             return Response("CSR signature verification failed", status=400)
+        
+#         # 14. Create a client certificate.
+#         not_before = datetime.now(timezone.utc) - timedelta(minutes=random.randint(0, 119))
+#         not_after = not_before + timedelta(days=365)
+#         certificate_builder = x509.CertificateBuilder()
+#         certificate_builder = certificate_builder.subject_name(
+#             x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, device_id)])
+#         )
+#         # Use the Root CA subject as the issuer.
+#         issuer_components = root_cert_parsed.get_subject().get_components()
+#         issuer_name = x509.Name([x509.NameAttribute(k.decode('utf-8'), v.decode('utf-8')) for k, v in issuer_components])
+#         certificate_builder = certificate_builder.issuer_name(issuer_name)
+#         certificate_builder = certificate_builder.public_key(csr.public_key())
+#         certificate_builder = certificate_builder.serial_number(random.randint(1000, 1000000))
+#         certificate_builder = certificate_builder.not_valid_before(not_before)
+#         certificate_builder = certificate_builder.not_valid_after(not_after)
+#         certificate_builder = certificate_builder.add_extension(
+#             x509.KeyUsage(
+#                 digital_signature=True,
+#                 content_commitment=False,
+#                 key_encipherment=False,
+#                 data_encipherment=False,
+#                 key_agreement=False,
+#                 key_cert_sign=False,
+#                 crl_sign=False,
+#                 encipher_only=False,
+#                 decipher_only=False
+#             ),
+#             critical=True
+#         )
+#         certificate_builder = certificate_builder.add_extension(
+#             x509.ExtendedKeyUsage([ExtendedKeyUsageOID.CLIENT_AUTH]),
+#             critical=True
+#         )
+        
+#         # Convert the OpenSSL key to a cryptography key.
+#         root_key_pem = crypto.dump_privatekey(crypto.FILETYPE_PEM, root_key_parsed)
+#         root_key_crypto = serialization.load_pem_private_key(root_key_pem, password=None, backend=default_backend())
+        
+#         client_certificate = certificate_builder.sign(
+#             private_key=root_key_crypto,
+#             algorithm=hashes.SHA256(),
+#             backend=default_backend()
+#         )
+        
+#         client_cert_der = client_certificate.public_bytes(encoding=x509.Encoding.DER)
+#         print("Client certificate signed successfully")
+        
+#         # 15. Compute SHA-1 fingerprints.
+#         client_cert_fingerprint = hashlib.sha1(client_cert_der).hexdigest().upper()
+#         print("Client Certificate Fingerprint:", client_cert_fingerprint)
+#         identity_cert_fingerprint = hashlib.sha1(root_certificate_der).hexdigest().upper()
+#         print("Identity Certificate Fingerprint:", identity_cert_fingerprint)
+        
+#         # 16. Determine CertStore.
+#         cert_store = "System" if enrollment_type == "Device" else "User"
+#         print("CertStore:", cert_store)
+        
+#         # 17. Generate WAP provisioning profile XML.
+#         wap_provision_profile = f"""<?xml version="1.0" encoding="UTF-8"?>
+#         <wap-provisioningdoc version="1.1">
+#             <characteristic type="CertificateStore">
+#                 <characteristic type="Root">
+#                     <characteristic type="System">
+#                         <characteristic type="{identity_cert_fingerprint}">
+#                             <parm name="EncodedCertificate" value="{base64.b64encode(root_certificate_der).decode('utf-8')}" />
+#                         </characteristic>
+#                     </characteristic>
+#                 </characteristic>
+#                 <characteristic type="My">
+#                     <characteristic type="{cert_store}">
+#                         <characteristic type="{client_cert_fingerprint}">
+#                             <parm name="EncodedCertificate" value="{base64.b64encode(client_cert_der).decode('utf-8')}" />
+#                         </characteristic>
+#                         <characteristic type="PrivateKeyContainer" />
+#                     </characteristic>
+#                 </characteristic>
+#             </characteristic>
+#             <characteristic type="APPLICATION">
+#                 <parm name="APPID" value="w7" />
+#                 <parm name="PROVIDER-ID" value="DEMO MDM" />
+#                 <parm name="NAME" value="Windows MDM Demo Server" />
+#                 <parm name="ADDR" value="https://windowsmdm.sujanix.com/ManagementServer/MDM.svc" />
+#                 <parm name="ROLE" value="4294967295" />
+#                 <parm name="BACKCOMPATRETRYDISABLED" />
+#                 <parm name="DEFAULTENCODING" value="application/vnd.syncml.dm+xml" />
+#                 <characteristic type="APPAUTH">
+#                     <parm name="AAUTHLEVEL" value="CLIENT" />
+#                     <parm name="AAUTHTYPE" value="DIGEST" />
+#                     <parm name="AAUTHSECRET" value="dummy" />
+#                     <parm name="AAUTHDATA" value="nonce" />
+#                 </characteristic>
+#                 <characteristic type="APPAUTH">
+#                     <parm name="AAUTHLEVEL" value="APPSRV" />
+#                     <parm name="AAUTHTYPE" value="DIGEST" />
+#                     <parm name="AAUTHNAME" value="dummy" />
+#                     <parm name="AAUTHSECRET" value="dummy" />
+#                     <parm name="AAUTHDATA" value="nonce" />
+#                 </characteristic>
+#             </characteristic>
+#             <characteristic type="DMClient">
+#                 <characteristic type="Provider">
+#                     <characteristic type="DEMO MDM">
+#                         <characteristic type="Poll">
+#                             <parm name="NumberOfFirstRetries" value="8" datatype="integer" />
+#                         </characteristic>
+#                     </characteristic>
+#                 </characteristic>
+#             </characteristic>
+#         </wap-provisioningdoc>"""
+                
+#         wap_provision_profile_raw = wap_provision_profile.replace("\n", "").replace("\t", "").encode("utf-8")
+                
+#      # 18. Create SOAP response payload.
+#         response_xml = f"""<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"
+#             xmlns:a="http://www.w3.org/2005/08/addressing"
+#             xmlns:u="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-utility-1.0.xsd">
+#             <s:Header>
+#                 <a:Action s:mustUnderstand="1">http://schemas.microsoft.com/windows/pki/2009/01/enrollment/RSTRC/wstep</a:Action>
+#                 <a:RelatesTo>{message_id}</a:RelatesTo>
+#                 <o:Security xmlns:o="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd" s:mustUnderstand="1">
+#                     <u:Timestamp u:Id="_0">
+#                         <u:Created>2018-11-30T00:32:59.420Z</u:Created>
+#                         <u:Expires>2018-12-30T00:37:59.420Z</u:Expires>
+#                     </u:Timestamp>
+#                 </o:Security>
+#             </s:Header>
+#             <s:Body>
+#                 <RequestSecurityTokenResponseCollection xmlns="http://docs.oasis-open.org/ws-sx/ws-trust/200512">
+#                     <RequestSecurityTokenResponse>
+#                         <TokenType>http://schemas.microsoft.com/5.0.0.0/ConfigurationManager/Enrollment/DeviceEnrollmentToken</TokenType>
+#                         <DispositionMessage xmlns="http://schemas.microsoft.com/windows/pki/2009/01/enrollment"></DispositionMessage>
+#                         <RequestedSecurityToken>
+#                             <BinarySecurityToken xmlns="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd" 
+#                                 ValueType="http://schemas.microsoft.com/5.0.0.0/ConfigurationManager/Enrollment/DeviceEnrollmentProvisionDoc" 
+#                                 EncodingType="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd#base64binary">
+#                                 {base64.b64encode(wap_provision_profile_raw).decode('utf-8')}
+#                             </BinarySecurityToken>
+#                         </RequestedSecurityToken>
+#                         <RequestID xmlns="http://schemas.microsoft.com/windows/pki/2009/01/enrollment">0</RequestID>
+#                     </RequestSecurityTokenResponse>
+#                 </RequestSecurityTokenResponseCollection>
+#             </s:Body>
+#         </s:Envelope>"""
+#         print(response_xml)
+        
+#         resp = Response(response_xml, mimetype="application/soap+xml; charset=utf-8")
+#         resp.headers["Content-Length"] = str(len(response_xml))
+#         return resp
+
+#     except Exception as e:
+#         print("Error processing enrollment request:", e)
+#         return Response("Internal Server Error", status=500)
+     
 @app.route('/EnrollmentServer/Enrollment.svc', methods=['POST'])
 def enroll_service():
     print("NEW____ENROLLMENT_API___________")
@@ -527,7 +814,7 @@ def enroll_service():
         # 1. Read the HTTP request body as a UTF-8 string.
         body = request.get_data(as_text=True)
         print("HTTP Request Body:", body)
-        
+
         # 2. Extract the MessageID.
         message_id_match = re.search(r'<a:MessageID>(.*?)<\/a:MessageID>', body, re.DOTALL)
         if message_id_match:
@@ -535,16 +822,16 @@ def enroll_service():
             print("Extracted MessageID:", message_id)
         else:
             return Response("MessageID not found", status=400)
-        
+
         # 3. Parse the SOAP XML envelope.
         envelope = ET.fromstring(body)
-        
+
         # 4. Retrieve the <wsse:BinarySecurityToken> element.
         wsse_ns = "http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd"
         token_elem = envelope.find(f'.//{{{wsse_ns}}}BinarySecurityToken')
         if token_elem is None:
             return Response("BinarySecurityToken not found", status=400)
-        
+
         # 5. Validate the required attributes.
         expected_value_type = "http://schemas.microsoft.com/5.0.0.0/ConfigurationManager/Enrollment/DeviceEnrollmentUserToken"
         expected_encoding_type = "http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd#base64binary"
@@ -554,11 +841,11 @@ def enroll_service():
             error_msg = f"Invalid BinarySecurityToken attributes: ValueType: {value_type}, EncodingType: {encoding_type}"
             print(error_msg)
             return Response(error_msg, status=400)
-        
+
         # 6. Extract the BinarySecurityToken content.
         binary_security_token = token_elem.text.strip()
         print("Extracted BinarySecurityToken:", binary_security_token)
-        
+
         # 7. Extract DeviceID.
         device_id_match = re.search(
             r'<ac:ContextItem Name="DeviceID"><ac:Value>(.*?)<\/ac:Value><\/ac:ContextItem>',
@@ -568,7 +855,7 @@ def enroll_service():
             print("Extracted DeviceID:", device_id)
         else:
             return Response("DeviceID not found", status=400)
-        
+
         # 8. Extract EnrollmentType.
         enrollment_type_match = re.search(
             r'<ac:ContextItem Name="EnrollmentType"><ac:Value>(.*?)<\/ac:Value><\/ac:ContextItem>',
@@ -578,8 +865,8 @@ def enroll_service():
             print("Extracted EnrollmentType:", enrollment_type)
         else:
             return Response("EnrollmentType not found", status=400)
-        
-        # 9. Load raw Root CA certificate and private key from PEM files.
+
+        # 9. Load the server's Root CA certificate and private key (the CA identity).
         try:
             with open("./identities/rootCA.crt", "rb") as cert_file:
                 root_certificate_pem = cert_file.read()
@@ -587,21 +874,20 @@ def enroll_service():
                 root_private_key_pem = key_file.read()
             print("Root CA certificate and private key loaded successfully (PEM)")
         except Exception as e:
-            print("Error loading certificates:", e)
+            print("Error loading CA certificates:", e)
             return Response("Internal Server Error", status=500)
-        
-        # 10. Parse the PEM certificates and convert them to DER.
+
+        # 10. Parse the CA certificate and key (PEM) and convert them to DER format.
         try:
             root_cert_parsed = crypto.load_certificate(crypto.FILETYPE_PEM, root_certificate_pem)
             root_key_parsed = crypto.load_privatekey(crypto.FILETYPE_PEM, root_private_key_pem)
             root_certificate_der = crypto.dump_certificate(crypto.FILETYPE_ASN1, root_cert_parsed)
-            root_private_key_der = crypto.dump_privatekey(crypto.FILETYPE_ASN1, root_key_parsed)
-            print("Parsed and converted Root CA certificate and private key to DER successfully")
+            print("Parsed and converted Root CA certificate to DER successfully")
         except Exception as e:
-            print("Error parsing/converting certificates:", e)
+            print("Error parsing/converting CA certificates:", e)
             return Response("Internal Server Error", status=500)
-        
-        # 11. Decode the Base64 BinarySecurityToken to get the CSR raw bytes.
+
+        # 11. Decode the BinarySecurityToken (Base64) to get the CSR raw bytes.
         try:
             decoded_token = base64.b64decode(binary_security_token)
             print("Decoded BinarySecurityToken (hex):", decoded_token.hex()[:100])
@@ -609,28 +895,18 @@ def enroll_service():
             print("Error decoding BinarySecurityToken:", e)
             return Response("Invalid BinarySecurityToken format", status=400)
 
-        # Check if a certificate (instead of a CSR) was sent.
-        if decoded_token.strip().startswith(b"-----BEGIN CERTIFICATE-----"):
-            print("Received a certificate instead of a CSR.")
-            return Response("Expected a CSR but received a certificate. Please generate a proper CSR.", status=400)
-        
-        # 12. Parse the CSR.
+        # 12. Parse the CSR. In production, we require a valid CSR from the client.
         try:
-            # If the token is in PEM format.
-            if decoded_token.strip().startswith(b"-----BEGIN"):
-                if b"CERTIFICATE REQUEST" in decoded_token:
-                    csr = x509.load_pem_x509_csr(decoded_token, default_backend())
-                    print("CSR loaded successfully (PEM)")
-                else:
-                    return Response("Expected a CSR PEM, but got unexpected header", status=400)
+            if not decoded_token.strip().startswith(b"-----BEGIN CERTIFICATE REQUEST-----"):
+                print("Token does not start with '-----BEGIN CERTIFICATE REQUEST-----'. Rejecting enrollment.")
+                return Response("Expected a CSR in PEM format from the client", status=400)
             else:
-                # Assume DER format.
-                csr = x509.load_der_x509_csr(decoded_token, default_backend())
-                print("CSR loaded successfully (DER)")
+                csr = x509.load_pem_x509_csr(decoded_token, default_backend())
+                print("CSR loaded successfully (PEM) from request.")
         except Exception as e:
             print("Error parsing CSR:", e)
             return Response("Invalid CSR", status=400)
-                
+
         # 13. Verify the CSR signature.
         try:
             csr.public_key().verify(
@@ -643,17 +919,29 @@ def enroll_service():
         except Exception as e:
             print("CSR signature verification failed:", e)
             return Response("CSR signature verification failed", status=400)
-        
-        # 14. Create a client certificate.
-        not_before = datetime.now(timezone.utc) - timedelta(minutes=random.randint(0, 119))
+
+        # 14. Create a client certificate by signing the CSR with the CA's private key.
+        not_before = datetime.utcnow() - timedelta(minutes=random.randint(0, 119))
         not_after = not_before + timedelta(days=365)
         certificate_builder = x509.CertificateBuilder()
         certificate_builder = certificate_builder.subject_name(
             x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, device_id)])
         )
-        # Use the Root CA subject as the issuer.
+        # For the issuer, use the CA's subject.
         issuer_components = root_cert_parsed.get_subject().get_components()
-        issuer_name = x509.Name([x509.NameAttribute(k.decode('utf-8'), v.decode('utf-8')) for k, v in issuer_components])
+        issuer_attributes = []
+        for k, v in issuer_components:
+            key_str = k.decode('utf-8').upper()  # Convert key to uppercase for oid_map
+            value_str = v.decode('utf-8')
+            oid = oid_map.get(key_str)
+            if oid is None:
+                try:
+                    oid = x509.ObjectIdentifier(key_str)
+                except Exception as ex:
+                    print("Unable to convert issuer component key to OID:", key_str)
+                    continue
+            issuer_attributes.append(x509.NameAttribute(oid, value_str))
+        issuer_name = x509.Name(issuer_attributes)
         certificate_builder = certificate_builder.issuer_name(issuer_name)
         certificate_builder = certificate_builder.public_key(csr.public_key())
         certificate_builder = certificate_builder.serial_number(random.randint(1000, 1000000))
@@ -677,118 +965,119 @@ def enroll_service():
             x509.ExtendedKeyUsage([ExtendedKeyUsageOID.CLIENT_AUTH]),
             critical=True
         )
-        
-        # Convert the OpenSSL key to a cryptography key.
+
+        # Convert the CA key (from pyOpenSSL) to a cryptography key.
         root_key_pem = crypto.dump_privatekey(crypto.FILETYPE_PEM, root_key_parsed)
         root_key_crypto = serialization.load_pem_private_key(root_key_pem, password=None, backend=default_backend())
-        
+
         client_certificate = certificate_builder.sign(
             private_key=root_key_crypto,
             algorithm=hashes.SHA256(),
             backend=default_backend()
         )
-        
-        client_cert_der = client_certificate.public_bytes(encoding=x509.Encoding.DER)
+        client_cert_der = client_certificate.public_bytes(encoding=serialization.Encoding.DER)
         print("Client certificate signed successfully")
-        
+
         # 15. Compute SHA-1 fingerprints.
         client_cert_fingerprint = hashlib.sha1(client_cert_der).hexdigest().upper()
         print("Client Certificate Fingerprint:", client_cert_fingerprint)
         identity_cert_fingerprint = hashlib.sha1(root_certificate_der).hexdigest().upper()
         print("Identity Certificate Fingerprint:", identity_cert_fingerprint)
-        
-        # 16. Determine CertStore.
+
+        # 16. Determine the certificate store based on EnrollmentType.
         cert_store = "System" if enrollment_type == "Device" else "User"
         print("CertStore:", cert_store)
-        
+
         # 17. Generate WAP provisioning profile XML.
         wap_provision_profile = f"""<?xml version="1.0" encoding="UTF-8"?>
-        <wap-provisioningdoc version="1.1">
-            <characteristic type="CertificateStore">
-                <characteristic type="Root">
-                    <characteristic type="System">
-                        <characteristic type="{identity_cert_fingerprint}">
-                            <parm name="EncodedCertificate" value="{base64.b64encode(root_certificate_der).decode('utf-8')}" />
-                        </characteristic>
-                    </characteristic>
-                </characteristic>
-                <characteristic type="My">
-                    <characteristic type="{cert_store}">
-                        <characteristic type="{client_cert_fingerprint}">
-                            <parm name="EncodedCertificate" value="{base64.b64encode(client_cert_der).decode('utf-8')}" />
-                        </characteristic>
-                        <characteristic type="PrivateKeyContainer" />
-                    </characteristic>
-                </characteristic>
-            </characteristic>
-            <characteristic type="APPLICATION">
-                <parm name="APPID" value="w7" />
-                <parm name="PROVIDER-ID" value="DEMO MDM" />
-                <parm name="NAME" value="Windows MDM Demo Server" />
-                <parm name="ADDR" value="https://windowsmdm.sujanix.com/ManagementServer/MDM.svc" />
-                <parm name="ROLE" value="4294967295" />
-                <parm name="BACKCOMPATRETRYDISABLED" />
-                <parm name="DEFAULTENCODING" value="application/vnd.syncml.dm+xml" />
-                <characteristic type="APPAUTH">
-                    <parm name="AAUTHLEVEL" value="CLIENT" />
-                    <parm name="AAUTHTYPE" value="DIGEST" />
-                    <parm name="AAUTHSECRET" value="dummy" />
-                    <parm name="AAUTHDATA" value="nonce" />
-                </characteristic>
-                <characteristic type="APPAUTH">
-                    <parm name="AAUTHLEVEL" value="APPSRV" />
-                    <parm name="AAUTHTYPE" value="DIGEST" />
-                    <parm name="AAUTHNAME" value="dummy" />
-                    <parm name="AAUTHSECRET" value="dummy" />
-                    <parm name="AAUTHDATA" value="nonce" />
-                </characteristic>
-            </characteristic>
-            <characteristic type="DMClient">
-                <characteristic type="Provider">
-                    <characteristic type="DEMO MDM">
-                        <characteristic type="Poll">
-                            <parm name="NumberOfFirstRetries" value="8" datatype="integer" />
-                        </characteristic>
-                    </characteristic>
-                </characteristic>
-            </characteristic>
-        </wap-provisioningdoc>"""
-                
+                                <wap-provisioningdoc version="1.1">
+                                    <characteristic type="CertificateStore">
+                                        <characteristic type="Root">
+                                            <characteristic type="System">
+                                                <characteristic type="{identity_cert_fingerprint}">
+                                                    <parm name="EncodedCertificate" value="{base64.b64encode(root_certificate_der).decode('utf-8')}" />
+                                                </characteristic>
+                                            </characteristic>
+                                        </characteristic>
+                                    </characteristic>
+                                    <characteristic type="My">
+                                        <characteristic type="{cert_store}">
+                                            <characteristic type="{client_cert_fingerprint}">
+                                                <parm name="EncodedCertificate" value="{base64.b64encode(client_cert_der).decode('utf-8')}" />
+                                            </characteristic>
+                                            <characteristic type="PrivateKeyContainer" />
+                                        </characteristic>
+                                    </characteristic>
+                                    <characteristic type="APPLICATION">
+                                        <parm name="APPID" value="w7" />
+                                        <parm name="PROVIDER-ID" value="DEMO MDM" />
+                                        <parm name="NAME" value="Windows MDM Demo Server" />
+                                        <parm name="ADDR" value="https://{domain}/ManagementServer/MDM.svc" />
+                                        <parm name="ServerList" value="https://{domain}/ManagementServer/ServerList.svc" />
+                                        <parm name="ROLE" value="4294967295" />
+                                        <parm name="BACKCOMPATRETRYDISABLED" />
+                                        <parm name="DEFAULTENCODING" value="application/vnd.syncml.dm+xml" />
+                                        <characteristic type="APPAUTH">
+                                            <parm name="AAUTHLEVEL" value="CLIENT" />
+                                            <parm name="AAUTHTYPE" value="DIGEST" />
+                                            <parm name="AAUTHSECRET" value="dummy" />
+                                            <parm name="AAUTHDATA" value="nonce" />
+                                        </characteristic>
+                                        <characteristic type="APPAUTH">
+                                            <parm name="AAUTHLEVEL" value="APPSRV" />
+                                            <parm name="AAUTHTYPE" value="DIGEST" />
+                                            <parm name="AAUTHNAME" value="dummy" />
+                                            <parm name="AAUTHSECRET" value="dummy" />
+                                            <parm name="AAUTHDATA" value="nonce" />
+                                        </characteristic>
+                                    </characteristic>
+                                    <characteristic type="DMClient">
+                                        <characteristic type="Provider">
+                                            <characteristic type="DEMO MDM">
+                                                <characteristic type="Poll">
+                                                    <parm name="NumberOfFirstRetries" value="8" datatype="integer" />
+                                                </characteristic>
+                                            </characteristic>
+                                        </characteristic>
+                                    </characteristic>
+                                </wap-provisioningdoc>"""
+
         wap_provision_profile_raw = wap_provision_profile.replace("\n", "").replace("\t", "").encode("utf-8")
-                
-     # 18. Create SOAP response payload.
+
+        # 18. Create SOAP response payload.
         response_xml = f"""<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"
-            xmlns:a="http://www.w3.org/2005/08/addressing"
-            xmlns:u="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-utility-1.0.xsd">
-            <s:Header>
-                <a:Action s:mustUnderstand="1">http://schemas.microsoft.com/windows/pki/2009/01/enrollment/RSTRC/wstep</a:Action>
-                <a:RelatesTo>{message_id}</a:RelatesTo>
-                <o:Security xmlns:o="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd" s:mustUnderstand="1">
-                    <u:Timestamp u:Id="_0">
-                        <u:Created>2018-11-30T00:32:59.420Z</u:Created>
-                        <u:Expires>2018-12-30T00:37:59.420Z</u:Expires>
-                    </u:Timestamp>
-                </o:Security>
-            </s:Header>
-            <s:Body>
-                <RequestSecurityTokenResponseCollection xmlns="http://docs.oasis-open.org/ws-sx/ws-trust/200512">
-                    <RequestSecurityTokenResponse>
-                        <TokenType>http://schemas.microsoft.com/5.0.0.0/ConfigurationManager/Enrollment/DeviceEnrollmentToken</TokenType>
-                        <DispositionMessage xmlns="http://schemas.microsoft.com/windows/pki/2009/01/enrollment"></DispositionMessage>
-                        <RequestedSecurityToken>
-                            <BinarySecurityToken xmlns="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd" 
-                                ValueType="http://schemas.microsoft.com/5.0.0.0/ConfigurationManager/Enrollment/DeviceEnrollmentProvisionDoc" 
-                                EncodingType="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd#base64binary">
-                                {base64.b64encode(wap_provision_profile_raw).decode('utf-8')}
-                            </BinarySecurityToken>
-                        </RequestedSecurityToken>
-                        <RequestID xmlns="http://schemas.microsoft.com/windows/pki/2009/01/enrollment">0</RequestID>
-                    </RequestSecurityTokenResponse>
-                </RequestSecurityTokenResponseCollection>
-            </s:Body>
-        </s:Envelope>"""
+    xmlns:a="http://www.w3.org/2005/08/addressing"
+    xmlns:u="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-utility-1.0.xsd">
+    <s:Header>
+        <a:Action s:mustUnderstand="1">http://schemas.microsoft.com/windows/pki/2009/01/enrollment/RSTRC/wstep</a:Action>
+        <a:RelatesTo>{message_id}</a:RelatesTo>
+        <o:Security xmlns:o="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd" s:mustUnderstand="1">
+            <u:Timestamp u:Id="_0">
+                <u:Created>2018-11-30T00:32:59.420Z</u:Created>
+                <u:Expires>2018-12-30T00:37:59.420Z</u:Expires>
+            </u:Timestamp>
+        </o:Security>
+    </s:Header>
+    <s:Body>
+        <RequestSecurityTokenResponseCollection xmlns="http://docs.oasis-open.org/ws-sx/ws-trust/200512">
+            <RequestSecurityTokenResponse>
+                <TokenType>http://schemas.microsoft.com/5.0.0.0/ConfigurationManager/Enrollment/DeviceEnrollmentToken</TokenType>
+                <DispositionMessage xmlns="http://schemas.microsoft.com/windows/pki/2009/01/enrollment"></DispositionMessage>
+                <RequestedSecurityToken>
+                    <BinarySecurityToken xmlns="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd"
+                        ValueType="http://schemas.microsoft.com/5.0.0.0/ConfigurationManager/Enrollment/DeviceEnrollmentProvisionDoc"
+                        EncodingType="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd#base64binary">
+                        {base64.b64encode(wap_provision_profile_raw).decode('utf-8')}
+                    </BinarySecurityToken>
+                </RequestedSecurityToken>
+                <RequestID xmlns="http://schemas.microsoft.com/windows/pki/2009/01/enrollment">0</RequestID>
+            </RequestSecurityTokenResponse>
+        </RequestSecurityTokenResponseCollection>
+    </s:Body>
+</s:Envelope>"""
+        print("Final Enrollment Response Payload:")
         print(response_xml)
-        
+
         resp = Response(response_xml, mimetype="application/soap+xml; charset=utf-8")
         resp.headers["Content-Length"] = str(len(response_xml))
         return resp
@@ -796,11 +1085,9 @@ def enroll_service():
     except Exception as e:
         print("Error processing enrollment request:", e)
         return Response("Internal Server Error", status=500)
-     
 
-     
-     
-    
+
+
 @app.route('/devices', methods=['GET'])
 def devices():
     # Simulated device listing. Replace with your graph_api.list_devices() if available.
